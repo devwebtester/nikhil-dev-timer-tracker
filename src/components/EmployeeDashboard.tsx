@@ -148,7 +148,7 @@ const DEFAULT_ALERT_SETTINGS: AlertSettings = {
 
 const ALERT_SNOOZE_MINUTES = 10;
 const MAX_TIMER_CATCHUP_SECONDS = 300;
-const MAX_TIMER_GAP_SECONDS = 15 * 60;
+const MAX_TIMER_GAP_SECONDS = 5;
 
 const toMinutes = (value: string): number => {
   if (!value || !value.includes(":")) {
@@ -1275,8 +1275,8 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
       const now = Date.now();
       const gap = now - lastTickMsRef.current;
       if (gap > MAX_TIMER_GAP_SECONDS * 1000) {
-        segmentStartRef.current = segmentStart + (gap - 1000);
-      }
+  segmentStartRef.current = now - 1000;
+}
       lastTickMsRef.current = now;
       const elapsed = Math.max(
         0,
