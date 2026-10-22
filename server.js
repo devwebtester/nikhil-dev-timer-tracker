@@ -1754,6 +1754,53 @@ app.post(
   }
 );
 
+// LOCAL TESTING: Admin login
+app.post('/api/login-admin', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and password are required.',
+      });
+    }
+
+    const admin = readEmployees().find(
+      (item) =>
+        normalizeEmail(item.email) === normalizeEmail(email) &&
+        item.password === password &&
+        item.role === 'admin' &&
+        item.approved !== false
+    );
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid admin credentials. Local admin account not configured.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      token: `local-admin-${admin.id}-${Date.now()}`,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      admin: {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: 'admin',
+        approved: true,
+        createdAt: admin.createdAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // ======================================================
 // DELETE EMPLOYEE
 // ======================================================

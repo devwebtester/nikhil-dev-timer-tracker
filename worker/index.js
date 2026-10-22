@@ -30,8 +30,7 @@ function employeeToPublic(row) {
     name: row.name,
     email: row.email,
 
-    password:
-      row.password || '',
+    
 
     role: row.role,
     approved: Boolean(row.approved),
@@ -330,8 +329,7 @@ async function handleApi(
           env.SCREENSHOTS
         ),
 
-      database:
-        'codesdot-workmonitor-db',
+      database: 'nikhil-workmonitor-demo-db',
 
       serverTime:
         new Date()
