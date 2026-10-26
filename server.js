@@ -3936,7 +3936,10 @@ const CAPTURE_SETTINGS_DB =
     UPLOAD_DIR,
     'capture-settings.json'
   );
-
+const FORGOTTEN_TIME_DB = path.join(
+  UPLOAD_DIR,
+  'forgotten-time-requests.json'
+);
 // ======================================================
 // DEFAULT CAPTURE SETTINGS
 // ======================================================
@@ -4035,7 +4038,74 @@ function ensureObjectFile(
     );
   }
 }
+function readForgottenTimeRequests() {
+  return readArray(
+    FORGOTTEN_TIME_DB,
+    'forgotten time requests'
+  );
+}
 
+function saveForgottenTimeRequests(data) {
+  writeJson(
+    FORGOTTEN_TIME_DB,
+    data
+  );
+}
+
+function parseTimeToMinutes(value) {
+  const text = String(value || '').trim();
+
+  if (!text) return null;
+
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function calculateManualDurationSeconds(fromTime, toTime) {
+  const fromMinutes = parseTimeToMinutes(fromTime);
+  const toMinutes = parseTimeToMinutes(toTime);
+
+  if (fromMinutes === null || toMinutes === null) {
+    return null;
+  }
+
+  if (toMinutes <= fromMinutes) {
+    return null;
+  }
+
+  return (toMinutes - fromMinutes) * 60;
+}
+
+function publicForgottenTimeRequest(request) {
+  return {
+    ...request,
+    requestedSeconds: Math.max(
+      0,
+      Math.floor(Number(request.requestedSeconds) || 0)
+    ),
+    approvedSeconds: Math.max(
+      0,
+      Math.floor(Number(request.approvedSeconds) || 0)
+    ),
+  };
+}
 ensureArrayFile(
   EMPLOYEE_DB
 );
@@ -4053,7 +4123,7 @@ ensureObjectFile(
   CAPTURE_SETTINGS_DB,
   DEFAULT_CAPTURE_SETTINGS
 );
-
+ensureArrayFile(FORGOTTEN_TIME_DB);
 function readArray(
   filePath,
   label
@@ -5797,7 +5867,598 @@ app.post(
     }
   }
 );
+// ======================================================
+// FORGOTTEN TIMER - CREATE REQUEST
+// ======================================================
 
+app.post(
+  '/api/forgotten-time-requests',
+  (req, res) => {
+    try {
+      const {
+        employeeId,
+        employeeName,
+        dateKey,
+        fromTime,
+        toTime,
+        reason,
+      } = req.body || {};
+
+      if (!employeeId) {
+        return res.status(400).json({
+          success: false,
+          error: 'employeeId is required.',
+        });
+      }
+
+      if (!isValidDateKey(dateKey)) {
+        return res.status(400).json({
+          success: false,
+          error: 'A valid date is required.',
+        });
+      }
+
+      const cleanFromTime =
+        String(fromTime || '').trim();
+
+      const cleanToTime =
+        String(toTime || '').trim();
+
+      if (
+        !cleanFromTime ||
+        !cleanToTime
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'From time and To time are required.',
+        });
+      }
+
+      const cleanReason =
+        String(reason || '').trim();
+
+      if (!cleanReason) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Please explain why the timer was not started.',
+        });
+      }
+
+      const employee =
+        findEmployeeById(employeeId);
+
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          error: 'Employee not found.',
+        });
+      }
+
+      const requestedSeconds =
+        calculateManualDurationSeconds(
+          cleanFromTime,
+          cleanToTime
+        );
+
+      if (
+        requestedSeconds === null ||
+        requestedSeconds <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'To time must be later than From time.',
+        });
+      }
+
+      if (
+        requestedSeconds >
+        24 * 60 * 60
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Forgotten timer duration cannot exceed 24 hours.',
+        });
+      }
+
+      const requests =
+        readForgottenTimeRequests();
+
+      const duplicate =
+        requests.find(
+          (request) =>
+            String(request.employeeId) ===
+              String(employeeId) &&
+            request.dateKey ===
+              String(dateKey) &&
+            request.fromTime ===
+              cleanFromTime &&
+            request.toTime ===
+              cleanToTime &&
+            request.status === 'pending'
+        );
+
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          error:
+            'A matching forgotten timer request is already pending.',
+        });
+      }
+
+      const request = {
+        id:
+          `forgotten-${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2, 9)}`,
+
+        employeeId:
+          String(employeeId).trim(),
+
+        employeeName:
+          String(
+            employeeName ||
+              getEmployeeFullName(employee)
+          ).trim(),
+
+        employeeEmail:
+          employee.email,
+
+        dateKey:
+          String(dateKey).trim(),
+
+        fromTime:
+          cleanFromTime,
+
+        toTime:
+          cleanToTime,
+
+        requestedSeconds,
+
+        approvedSeconds: 0,
+
+        reason:
+          cleanReason,
+
+        status: 'pending',
+
+        createdAt:
+          new Date().toISOString(),
+
+        reviewedAt: null,
+
+        reviewedBy: null,
+
+        reviewReason: '',
+      };
+
+      requests.push(request);
+
+      saveForgottenTimeRequests(
+        requests
+      );
+
+      return res.status(201).json({
+        success: true,
+        request:
+          publicForgottenTimeRequest(
+            request
+          ),
+        message:
+          'Forgotten timer request submitted successfully.',
+      });
+    } catch (error) {
+      console.error(
+        'Create forgotten timer request error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          'Failed to create forgotten timer request.',
+      });
+    }
+  }
+);
+// ======================================================
+// FORGOTTEN TIMER - ADMIN REQUEST LIST
+// ======================================================
+
+app.get(
+  '/api/forgotten-time-requests',
+  (req, res) => {
+    try {
+      const requests =
+        readForgottenTimeRequests();
+
+      const sortedRequests =
+        requests
+          .slice()
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() -
+              new Date(a.createdAt).getTime()
+          )
+          .map(
+            publicForgottenTimeRequest
+          );
+
+      return res.json({
+        success: true,
+        requests: sortedRequests,
+      });
+    } catch (error) {
+      console.error(
+        'Get admin forgotten timer requests error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          'Failed to load forgotten timer requests.',
+      });
+    }
+  }
+);
+// ======================================================
+// FORGOTTEN TIMER - ADMIN APPROVE
+// ======================================================
+
+app.post(
+  '/api/forgotten-time-requests/:id/approve',
+  (req, res) => {
+    try {
+      const requestId =
+        String(req.params.id || '').trim();
+
+      if (!requestId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Request ID is required.',
+        });
+      }
+
+      const requests =
+        readForgottenTimeRequests();
+
+      const requestIndex =
+        requests.findIndex(
+          (item) =>
+            String(item.id) === requestId
+        );
+
+      if (requestIndex === -1) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'Forgotten timer request not found.',
+        });
+      }
+
+      const request =
+        requests[requestIndex];
+
+      if (request.status === 'approved') {
+        return res.status(400).json({
+          success: false,
+          error:
+            'This forgotten timer request is already approved.',
+        });
+      }
+
+      if (request.status === 'rejected') {
+        return res.status(400).json({
+          success: false,
+          error:
+            'A rejected request cannot be approved.',
+        });
+      }
+
+      const approvedSeconds =
+        Math.min(
+          Math.max(
+            0,
+            Math.floor(
+              Number(
+                request.requestedSeconds
+              ) || 0
+            )
+          ),
+          24 * 60 * 60
+        );
+
+      request.status = 'approved';
+
+      request.approvedSeconds =
+        approvedSeconds;
+
+      request.reviewedAt =
+        new Date().toISOString();
+
+      request.reviewedBy =
+        String(
+          req.body?.reviewedBy ||
+            'Admin'
+        ).trim();
+
+      request.reviewReason =
+        String(
+          req.body?.reviewReason || ''
+        ).trim();
+
+      requests[requestIndex] =
+        request;
+
+      saveForgottenTimeRequests(
+        requests
+      );
+
+      return res.json({
+        success: true,
+        message:
+          'Forgotten timer request approved successfully.',
+        request:
+          publicForgottenTimeRequest(
+            request
+          ),
+      });
+    } catch (error) {
+      console.error(
+        'Approve forgotten timer request error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          'Failed to approve forgotten timer request.',
+      });
+    }
+  }
+);
+
+// ======================================================
+// FORGOTTEN TIMER - APPROVED SECONDS HELPERS
+// ======================================================
+
+function getApprovedManualSeconds(
+  employeeId,
+  dateKey
+) {
+  const requests =
+    readForgottenTimeRequests();
+
+  return requests
+    .filter(
+      (request) =>
+        String(request.employeeId) ===
+          String(employeeId) &&
+        String(request.dateKey) ===
+          String(dateKey) &&
+        request.status === 'approved'
+    )
+    .reduce(
+      (total, request) =>
+        total +
+        Math.max(
+          0,
+          Math.floor(
+            Number(
+              request.approvedSeconds
+            ) || 0
+          )
+        ),
+      0
+    );
+}
+
+function getApprovedManualSecondsForEmployee(
+  employeeId
+) {
+  const requests =
+    readForgottenTimeRequests();
+
+  return requests
+    .filter(
+      (request) =>
+        String(request.employeeId) ===
+          String(employeeId) &&
+        request.status === 'approved'
+    )
+    .reduce(
+      (total, request) =>
+        total +
+        Math.max(
+          0,
+          Math.floor(
+            Number(
+              request.approvedSeconds
+            ) || 0
+          )
+        ),
+      0
+    );
+}
+// ======================================================
+// FORGOTTEN TIMER - ADMIN REJECT
+// ======================================================
+
+app.post(
+  '/api/forgotten-time-requests/:id/reject',
+  (req, res) => {
+    try {
+      const requestId =
+        String(req.params.id || '').trim();
+
+      if (!requestId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Request ID is required.',
+        });
+      }
+
+      const requests =
+        readForgottenTimeRequests();
+
+      const requestIndex =
+        requests.findIndex(
+          (item) =>
+            String(item.id) === requestId
+        );
+
+      if (requestIndex === -1) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'Forgotten timer request not found.',
+        });
+      }
+
+      const request =
+        requests[requestIndex];
+
+      if (request.status === 'approved') {
+        return res.status(400).json({
+          success: false,
+          error:
+            'An approved request cannot be rejected.',
+        });
+      }
+
+      if (request.status === 'rejected') {
+        return res.status(400).json({
+          success: false,
+          error:
+            'This forgotten timer request is already rejected.',
+        });
+      }
+
+      request.status = 'rejected';
+
+      request.approvedSeconds = 0;
+
+      request.reviewedAt =
+        new Date().toISOString();
+
+      request.reviewedBy =
+        String(
+          req.body?.reviewedBy ||
+            'Admin'
+        ).trim();
+
+      request.reviewReason =
+        String(
+          req.body?.reviewReason || ''
+        ).trim();
+
+      requests[requestIndex] =
+        request;
+
+      saveForgottenTimeRequests(
+        requests
+      );
+
+      return res.json({
+        success: true,
+        message:
+          'Forgotten timer request rejected successfully.',
+        request:
+          publicForgottenTimeRequest(
+            request
+          ),
+      });
+    } catch (error) {
+      console.error(
+        'Reject forgotten timer request error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          'Failed to reject forgotten timer request.',
+      });
+    }
+  }
+);
+// ======================================================
+// FORGOTTEN TIMER - EMPLOYEE'S OWN REQUESTS
+// ======================================================
+
+app.get(
+  '/api/forgotten-time-requests/:employeeId',
+  (req, res) => {
+    try {
+      const employeeId = String(req.params.employeeId || '').trim();
+
+      if (!employeeId) {
+        return res.status(400).json({
+          success: false,
+          error: 'employeeId is required.',
+        });
+      }
+
+      const requests = readForgottenTimeRequests()
+        .filter(
+          (request) =>
+            String(request.employeeId) === employeeId
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() -
+            new Date(a.createdAt).getTime()
+        )
+        .map(publicForgottenTimeRequest);
+
+      return res.json({
+        success: true,
+        requests,
+      });
+    } catch (error) {
+      console.error(
+        'Get employee forgotten timer requests error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          'Failed to load forgotten timer requests.',
+      });
+    }
+  }
+);
+app.get('/api/forgotten-time-requests/:employeeId', (req, res) => {
+  try {
+    const employeeId = String(req.params.employeeId || '').trim();
+
+    const requests = readForgottenTimeRequests()
+      .filter((request) => String(request.employeeId) === employeeId)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() -
+          new Date(a.createdAt).getTime()
+      )
+      .map(publicForgottenTimeRequest);
+
+    return res.json({ success: true, requests });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to load requests.',
+    });
+  }
+});
 // ======================================================
 // TRACKER TIME SAVE
 // ======================================================
@@ -5966,57 +6627,45 @@ app.post(
 // TRACKER BY DATE
 // ======================================================
 
+
+
 app.get(
   '/api/tracker-time/:employeeId/:dateKey',
-  (
-    req,
-    res
-  ) => {
+  (req, res) => {
     try {
-      const tracker =
-        readTracker();
+      const { employeeId, dateKey } = req.params;
+      const tracker = readTracker();
 
       const record =
-        tracker[
-          req.params.employeeId
-        ]?.dates?.[
-          req.params.dateKey
-        ];
+        tracker[employeeId]?.dates?.[dateKey];
+
+      const liveSeconds = Math.max(
+        0,
+        Number(record?.totalSeconds || 0)
+      );
+
+      const approvedManualSeconds =
+        getApprovedManualSeconds(employeeId, dateKey);
+
+      const totalSeconds =
+        liveSeconds + approvedManualSeconds;
 
       return res.json({
-        success:
-          true,
-
-        employeeId:
-          req.params.employeeId,
-
-        dateKey:
-          req.params.dateKey,
-
-        totalSeconds:
-          Number(
-            record?.totalSeconds ||
-              0
-          ),
-
-        updatedAt:
-          record?.updatedAt ||
-          null,
+        success: true,
+        employeeId,
+        dateKey,
+        totalSeconds,
+        liveSeconds,
+        approvedManualSeconds,
+        updatedAt: record?.updatedAt || null,
       });
-    } catch (
-      error
-    ) {
-      return res
-        .status(
-          500
-        )
-        .json({
-          success:
-            false,
+    } catch (error) {
+      console.error('Tracker by date error:', error);
 
-          error:
-            error.message,
-        });
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
     }
   }
 );
@@ -6153,15 +6802,31 @@ app.get(
             ([
               dateKey,
               value,
-            ]) => ({
-              dateKey,
-
-              totalSeconds:
+            ]) => {
+              const liveSeconds =
                 Number(
                   value?.totalSeconds ||
                     0
-                ),
-            })
+                );
+
+              const approvedManualSeconds =
+                getApprovedManualSeconds(
+                  req.params.employeeId,
+                  dateKey
+                );
+
+              return {
+                dateKey,
+
+                totalSeconds:
+                  liveSeconds +
+                  approvedManualSeconds,
+
+                liveSeconds,
+
+                approvedManualSeconds,
+              };
+            }
           );
 
       const totalSeconds =
@@ -6634,20 +7299,18 @@ app.get(
             dateKey,
 
             totalSeconds:
-              Number(
-                tracker[
-                  employee.id
-                ]?.dates?.[
-                  dateKey
-                ]?.totalSeconds ||
-                  0
-              ),
-
-            screenshotCount:
-              getScreenshotCount(
-                employee,
-                dateKey
-              ),
+  Number(
+    tracker[
+      employee.id
+    ]?.dates?.[
+      dateKey
+    ]?.totalSeconds ||
+      0
+  ) +
+  getApprovedManualSeconds(
+    employee.id,
+    dateKey
+  ),
           })
         );
 
@@ -6744,7 +7407,7 @@ app.get(
               ]?.dates ||
               {};
 
-            const todaySeconds =
+            const todayLiveSeconds =
               Number(
                 dates[
                   today
@@ -6752,7 +7415,17 @@ app.get(
                   0
               );
 
-            const monthlySeconds =
+            const todayApprovedManualSeconds =
+              getApprovedManualSeconds(
+                employee.id,
+                today
+              );
+
+            const todaySeconds =
+              todayLiveSeconds +
+              todayApprovedManualSeconds;
+
+            const monthlyLiveSeconds =
               Object.entries(
                 dates
               )
@@ -6780,6 +7453,37 @@ app.get(
                     ),
                   0
                 );
+
+            const monthlyApprovedManualSeconds =
+              Object.entries(
+                dates
+              )
+                .filter(
+                  ([
+                    dateKey,
+                  ]) =>
+                    dateKey.startsWith(
+                      month
+                    )
+                )
+                .reduce(
+                  (
+                    total,
+                    [
+                      dateKey,
+                    ]
+                  ) =>
+                    total +
+                    getApprovedManualSeconds(
+                      employee.id,
+                      dateKey
+                    ),
+                  0
+                );
+
+            const monthlySeconds =
+              monthlyLiveSeconds +
+              monthlyApprovedManualSeconds;
 
             return {
               employeeId:
@@ -6809,6 +7513,14 @@ app.get(
               todaySeconds,
 
               monthlySeconds,
+
+              todayLiveSeconds,
+
+              todayApprovedManualSeconds,
+
+              monthlyLiveSeconds,
+
+              monthlyApprovedManualSeconds,
 
               todayScreenshots:
                 getScreenshotCount(
@@ -6853,7 +7565,6 @@ app.get(
     }
   }
 );
-
 // ======================================================
 // MULTER SCREENSHOT STORAGE
 // ======================================================

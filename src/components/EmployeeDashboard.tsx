@@ -4541,6 +4541,61 @@ const readApiJson = async (response: Response) => {
 };
 
 // ======================================================
+// FORGOTTEN TIME HELPERS
+// ======================================================
+
+// Seconds covered by one forgotten-time request.
+const isForgottenRequestApproved = (request: any): boolean =>
+  String(request?.status || "")
+    .trim()
+    .toLowerCase()
+    .startsWith("approv");
+
+const getForgottenRequestDateKey = (request: any): string => {
+  const raw = String(request?.dateKey || request?.date || "")
+    .trim()
+    .slice(0, 10);
+  // Accept "DD-MM-YYYY" as well as "YYYY-MM-DD".
+  const dmy = raw.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  }
+  return raw.replace(/\//g, "-");
+};
+
+const getForgottenRequestSeconds = (request: any): number => {
+  const approved = Math.floor(
+    Number(request?.approvedSeconds ?? request?.approved_seconds) || 0,
+  );
+  if (approved > 0) return approved;
+
+  const from = toMinutes(String(request?.fromTime || ""));
+  const to = toMinutes(String(request?.toTime || ""));
+
+  if (Number.isNaN(from) || Number.isNaN(to) || to <= from) return 0;
+
+  return (to - from) * 60;
+};
+
+// onlyApproved = true  -> only admin-approved requests
+// onlyApproved = false -> only pending / rejected requests
+const sumForgottenSeconds = (
+  requests: any[],
+  dateKey: string,
+  onlyApproved: boolean,
+): number =>
+  requests.reduce((sum, request) => {
+    if (getForgottenRequestDateKey(request) !== dateKey) {
+      return sum;
+    }
+    const isApproved = isForgottenRequestApproved(request);
+    if (isApproved !== onlyApproved) {
+      return sum;
+    }
+    return sum + getForgottenRequestSeconds(request);
+  }, 0);
+
+// ======================================================
 // TYPES
 // ======================================================
 
@@ -4680,6 +4735,209 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [dayTotalSeconds, setDayTotalSeconds] = useState(0);
   const [lastStatus, setLastStatus] = useState("Ready to start tracking");
+
+  // ====================================================
+  // FORGOTTEN TIMER REQUEST
+  // ====================================================
+  const [forgottenTimeOpen, setForgottenTimeOpen] = useState(false);
+  const [forgottenDate, setForgottenDate] = useState(() => getTodayDateKey());
+  const [forgottenFromTime, setForgottenFromTime] = useState("");
+  const [forgottenToTime, setForgottenToTime] = useState("");
+  const [forgottenReason, setForgottenReason] = useState("");
+  const [forgottenSubmitting, setForgottenSubmitting] = useState(false);
+  const [forgottenMessage, setForgottenMessage] = useState("");
+  const [forgottenRequests, setForgottenRequests] = useState<any[]>([]);
+  const [forgottenRequestsLoading, setForgottenRequestsLoading] =
+    useState(false);
+    const [showForgottenRequests, setShowForgottenRequests] = useState(false);
+  // Latest request list (readable from timers / async code).
+  const forgottenRequestsRef = useRef<any[]>([]);
+
+  // How many approved forgotten seconds are already included in today's
+  // timer. Stored per day so a refresh never adds the same time twice.
+  const approvedAppliedStorageKey = () =>
+    `wm_emp_approved_applied_${currentUser.id}_${getTodayDateKey()}`;
+
+  const readAppliedApprovedSeconds = (): number => {
+    try {
+      const raw = localStorage.getItem(approvedAppliedStorageKey());
+      return Math.max(0, Math.floor(Number(raw) || 0));
+    } catch {
+      return 0;
+    }
+  };
+
+  const writeAppliedApprovedSeconds = (value: number) => {
+    try {
+      localStorage.setItem(approvedAppliedStorageKey(), String(value));
+    } catch {
+      // ignore
+    }
+  };
+
+  // Time is added to today's total ONLY for requests the admin approved.
+  // Pending and rejected requests never change the timer.
+  const applyApprovedForgottenTime = (requests: any[]) => {
+  const todayKey = getTodayDateKey();
+  const approvedToday = sumForgottenSeconds(requests, todayKey, true);
+  const alreadyApplied = readAppliedApprovedSeconds();
+  const delta = approvedToday - alreadyApplied;
+
+  console.info("[forgotten-time] check", {
+    todayKey,
+    approvedToday,
+    alreadyApplied,
+    delta,
+  });
+
+  if (delta === 0) return;
+
+  // ✅ Even if delta is negative (e.g. admin rejected later), resync refs
+  writeAppliedApprovedSeconds(approvedToday);
+
+  // ✅ Update both refs so the running tick() uses the correct base
+  daySecondsRef.current = Math.max(0, daySecondsRef.current + delta);
+  dayBaseRef.current = Math.max(0, dayBaseRef.current + delta);
+
+  // ✅ If timer is actively running, reset segment start so elapsed is not double-counted
+  if (trackingRef.current && !pausedRef.current) {
+    segmentStartRef.current = Date.now();
+    lastTickMsRef.current = Date.now();
+  }
+
+  setDayTotalSeconds(daySecondsRef.current);
+
+  if (delta > 0) {
+    setLastStatus(
+      `✅ Admin approved your forgotten time. ${formatSecondsToHoursMinutes(
+        delta,
+      )} added to today's total.`,
+    );
+  }
+};
+  const loadForgottenTimeRequests = async (silent = false) => {
+    if (!currentUser?.id) return;
+
+    if (!silent) {
+      setForgottenRequestsLoading(true);
+    }
+
+    try {
+      const response = await fetch(
+        `${backendUrl}/api/forgotten-time-requests/${encodeURIComponent(
+          currentUser.id,
+        )}?t=${Date.now()}`,
+        {
+          cache: "no-store",
+          headers: {
+            ...backendHeaders,
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.message || data?.error || "Failed to load requests.",
+        );
+      }
+
+      const requests = Array.isArray(data.requests) ? data.requests : [];
+      forgottenRequestsRef.current = requests;
+      setForgottenRequests(requests);
+      applyApprovedForgottenTime(requests);
+    } catch (error) {
+      console.error("Failed to load forgotten time requests:", error);
+    } finally {
+      if (!silent) {
+        setForgottenRequestsLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    void loadForgottenTimeRequests();
+    // Re-check every 15 seconds so an admin approval shows up without refresh.
+    const intervalId = window.setInterval(() => {
+      void loadForgottenTimeRequests(true);
+    }, 15000);
+    const handleFocus = () => {
+      void loadForgottenTimeRequests(true);
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  const submitForgottenTimeRequest = async () => {
+    if (!forgottenDate || !forgottenFromTime || !forgottenToTime) {
+      setForgottenMessage("Please select date, from time and to time.");
+      return;
+    }
+
+    if (!forgottenReason.trim()) {
+      setForgottenMessage("Please enter a reason.");
+      return;
+    }
+if (forgottenToTime === forgottenFromTime) {
+  setForgottenMessage("From Time and To Time cannot be the same.");
+  return;
+}
+    setForgottenSubmitting(true);
+    setForgottenMessage("");
+
+    try {
+      const response = await fetch(
+        `${backendUrl}/api/forgotten-time-requests`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...backendHeaders,
+          },
+          body: JSON.stringify({
+            employeeId: currentUser.id,
+            dateKey: forgottenDate,
+            fromTime: forgottenFromTime,
+            toTime: forgottenToTime,
+            reason: forgottenReason.trim(),
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.message || data?.error || "Failed to submit request.",
+        );
+      }
+
+      setForgottenMessage(
+        "Forgotten time request submitted. It will be added after Admin approval.",
+      );
+
+      setForgottenFromTime("");
+      setForgottenToTime("");
+      setForgottenReason("");
+
+      // Refresh request list so the new request appears as Pending
+      await loadForgottenTimeRequests();
+    } catch (error) {
+      setForgottenMessage(
+        error instanceof Error ? error.message : "Failed to submit request.",
+      );
+    } finally {
+      setForgottenSubmitting(false);
+    }
+  };
+
   const [nextCaptureInSec, setNextCaptureInSec] = useState<number | null>(null);
   const [lastCapturedTime, setLastCapturedTime] = useState("");
   const [needsScreenShare, setNeedsScreenShare] = useState(false);
@@ -5192,6 +5450,33 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
   );
   const scheduleAlertStorageKey = `wm_emp_schedule_alerts_${currentUser.id}`;
 
+  // Each schedule alert (start / break start / break end / daily complete)
+  // is shown only ONCE per day. The fired keys are stored in localStorage so
+  // refreshes and other tabs never show the same alert again.
+  const readFiredAlertKeys = (): string[] => {
+    try {
+      const raw = localStorage.getItem(
+        `wm_emp_alert_fired_${currentUser.id}_${getTodayDateKey()}`,
+      );
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const markAlertKeysFired = (keys: string[]) => {
+    try {
+      const merged = Array.from(new Set([...readFiredAlertKeys(), ...keys]));
+      localStorage.setItem(
+        `wm_emp_alert_fired_${currentUser.id}_${getTodayDateKey()}`,
+        JSON.stringify(merged),
+      );
+    } catch {
+      // ignore
+    }
+  };
+
   const publishScheduleAlertState = (
     alerts: ScheduleAlert[],
     snoozes: Record<string, number> = alertSnoozeRef.current,
@@ -5410,6 +5695,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
     setScheduleAlerts(next);
   };
 
+  // Dismiss: the alert was already marked as fired, so it will not come back.
   const snoozeScheduleAlert = (id: ScheduleAlert["id"]) => {
     alertSnoozeRef.current[id] = Date.now() + ALERT_SNOOZE_MINUTES * 60 * 1000;
     removeScheduleAlert(id);
@@ -5588,8 +5874,12 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
         : startMinutes + dailyHours * 60 + breakLength + 60;
 
       const wanted: ScheduleAlert[] = [];
+      // One "fire key" per alert type + its set time. Changing the time in
+      // settings creates a new key, so the new time can fire once again.
+      const fireKeys: Record<string, string> = {};
 
       if (goalReached && tracking) {
+        fireKeys.complete = `complete@${dailyHours}`;
         wanted.push({
           id: "complete",
           title: "Daily work hours complete",
@@ -5599,6 +5889,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
           action: "stop",
         });
       } else if (inBreak && tracking && !paused) {
+        fireKeys.breakStart = `breakStart@${config.breakStart}`;
         wanted.push({
           id: "breakStart",
           title: "Break time",
@@ -5617,6 +5908,9 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
           hasBreak &&
           nowMinutes >= breakEndMinutes &&
           nowMinutes < breakEndMinutes + 30;
+        fireKeys.start = afterBreak
+          ? `afterBreak@${config.breakEnd}`
+          : `start@${config.startTime}`;
         wanted.push({
           id: "start",
           title: afterBreak
@@ -5651,11 +5945,18 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
             : (wanted.find((item) => item.id === alert.id) as ScheduleAlert),
         );
 
+      const firedKeys = readFiredAlertKeys();
+
       const additions = wanted.filter(
         (item) =>
           !kept.some((alert) => alert.id === item.id) &&
-          Date.now() >= (alertSnoozeRef.current[item.id] || 0),
+          Date.now() >= (alertSnoozeRef.current[item.id] || 0) &&
+          !firedKeys.includes(fireKeys[item.id]),
       );
+
+      if (additions.length > 0) {
+        markAlertKeysFired(additions.map((item) => fireKeys[item.id]));
+      }
 
       const next = [...kept, ...additions];
 
@@ -5842,6 +6143,13 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
 
   const syncTrackerTime = async (seconds = daySecondsRef.current) => {
     try {
+      // Send only the time the timer really tracked. Admin-approved forgotten
+      // time is kept separately on the server, so it is not sent twice.
+      const liveSeconds = Math.max(
+        0,
+        Math.floor(seconds) - readAppliedApprovedSeconds(),
+      );
+
       const response = await fetch(`${backendUrl}/api/tracker-time`, {
         method: "POST",
         headers: {
@@ -5852,7 +6160,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
           employeeId: currentUser.id,
           employeeName: currentUser.name,
           dateKey: getTodayDateKey(),
-          totalSeconds: Math.max(0, Math.floor(seconds)),
+          totalSeconds: liveSeconds,
         }),
       });
 
@@ -5880,8 +6188,8 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
       const now = Date.now();
       const gap = now - lastTickMsRef.current;
       if (gap > MAX_TIMER_GAP_SECONDS * 1000) {
-  segmentStartRef.current = now - 1000;
-}
+        segmentStartRef.current = now - 1000;
+      }
       lastTickMsRef.current = now;
       const elapsed = Math.max(
         0,
@@ -6629,9 +6937,13 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
   // HISTORY
   // ====================================================
 
-  const loadDateHistory = async () => {
-    setLoadingHistory(true);
-    try {
+ const loadDateHistory = async () => {
+  setLoadingHistory(true);
+  try {
+    // ✅ Ensure forgotten requests are loaded FIRST
+    if (forgottenRequestsRef.current.length === 0) {
+      await loadForgottenTimeRequests(true);
+    }
       const [historyResponse, activityResponse] = await Promise.all([
         fetch(
           `${backendUrl}/api/activity-history/${encodeURIComponent(
@@ -6663,13 +6975,31 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
         );
         setSelectedDateSeconds(backendSeconds);
 
-        if (
-          selectedDate === getTodayDateKey() &&
-          backendSeconds > daySecondsRef.current
-        ) {
-          dayBaseRef.current += backendSeconds - daySecondsRef.current;
-          daySecondsRef.current = backendSeconds;
-          setDayTotalSeconds(backendSeconds);
+        if (selectedDate === getTodayDateKey()) {
+          // Never let pending / rejected forgotten time (or approved time
+          // that is not applied yet) leak into today's timer from the server.
+          const todayKeyNow = getTodayDateKey();
+          const requests = forgottenRequestsRef.current;
+          const unapprovedSeconds = sumForgottenSeconds(
+            requests,
+            todayKeyNow,
+            false,
+          );
+          const notYetAppliedApproved = Math.max(
+            0,
+            sumForgottenSeconds(requests, todayKeyNow, true) -
+              readAppliedApprovedSeconds(),
+          );
+          const trustedSeconds = Math.max(
+            0,
+            backendSeconds - unapprovedSeconds - notYetAppliedApproved,
+          );
+
+          if (trustedSeconds > daySecondsRef.current) {
+            dayBaseRef.current += trustedSeconds - daySecondsRef.current;
+            daySecondsRef.current = trustedSeconds;
+            setDayTotalSeconds(trustedSeconds);
+          }
         }
       } else {
         setSelectedDateSeconds(0);
@@ -7292,7 +7622,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
                 onClick={() => snoozeScheduleAlert(activeAlert.id)}
                 style={{ ...textButton("#334155"), padding: "2px 6px", fontSize: 10 }}
               >
-                Snooze
+                Dismiss
               </button>
             </div>
           </div>
@@ -7803,7 +8133,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
                     onClick={() => snoozeScheduleAlert(alert.id)}
                     className="cursor-pointer px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold hover:border-indigo-400"
                   >
-                    Snooze {ALERT_SNOOZE_MINUTES} min
+                    Dismiss
                   </button>
                 </div>
               </div>
@@ -7919,7 +8249,104 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
             </>
           )}
         </div>
+        {/* FORGOTTEN TIMER REQUEST */}
+        <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-white">
+                Forgot to start your timer?
+              </div>
+              <div className="text-xs text-slate-400 mt-1">
+                Submit the missed working time for Admin approval.
+              </div>
+            </div>
 
+            <button
+              type="button"
+              onClick={() => {
+                setForgottenTimeOpen((open) => !open);
+                setForgottenMessage("");
+              }}
+              className="cursor-pointer inline-flex items-center justify-center px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold"
+            >
+              {forgottenTimeOpen ? "Close Request" : "Request Missed Time"}
+            </button>
+          </div>
+
+          {forgottenTimeOpen && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Date
+                </label>
+                <input
+                  type="date"
+                  value={forgottenDate}
+                  onChange={(event) => setForgottenDate(event.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-white text-sm"
+                />
+              </div>
+
+              <div />
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  From Time
+                </label>
+                <input
+                  type="time"
+                  value={forgottenFromTime}
+                  onChange={(event) => setForgottenFromTime(event.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-white text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  To Time
+                </label>
+                <input
+                  type="time"
+                  value={forgottenToTime}
+                  onChange={(event) => setForgottenToTime(event.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-white text-sm"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Reason
+                </label>
+                <textarea
+                  value={forgottenReason}
+                  onChange={(event) => setForgottenReason(event.target.value)}
+                  placeholder="Example: I forgot to start the timer."
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-white text-sm resize-none"
+                />
+              </div>
+
+              {forgottenMessage && (
+                <div className="md:col-span-2 rounded-lg border border-indigo-700 bg-indigo-950/40 px-3 py-2 text-xs text-indigo-200">
+                  {forgottenMessage}
+                </div>
+              )}
+
+              <div className="md:col-span-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void submitForgottenTimeRequest()}
+                  disabled={forgottenSubmitting}
+                  className="cursor-pointer inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold"
+                >
+                  {forgottenSubmitting
+                    ? "Submitting..."
+                    : "Submit for Admin Approval"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         {isTracking && pipSupported && !pipWindow && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-3">
             <div className="text-xs">
@@ -7952,6 +8379,95 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
               {nextCaptureInSec}s
             </span>
           </div>
+        )}
+      </div>
+
+      {/* FORGOTTEN TIMER REQUEST STATUS */}
+          {/* FORGOTTEN TIMER REQUEST STATUS */}
+      <div className="mt-4 border-t border-slate-700 pt-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="text-sm font-bold text-white">
+            My Forgotten Time Requests
+          </div>
+          
+          {/* બટનનું નામ બદલીને View Requests કરવામાં આવ્યું છે */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowForgottenRequests((prev) => !prev);
+              if (!showForgottenRequests) {
+                void loadForgottenTimeRequests(true);
+              }
+            }}
+            className="cursor-pointer px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition"
+          >
+            {showForgottenRequests ? "Hide Requests" : "View Requests"}
+          </button>
+        </div>
+
+        {/* જ્યારે View Requests પર ક્લિક થાય ત્યારે જ આ બ્લોક દેખાશે */}
+        {showForgottenRequests && (
+          <>
+            {forgottenRequestsLoading ? (
+              <div className="text-sm text-slate-400">Loading requests...</div>
+            ) : forgottenRequests.length === 0 ? (
+              <div className="text-sm text-slate-500">
+                No forgotten time requests yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {forgottenRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    className="rounded-lg border border-slate-700 bg-slate-800/60 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">
+                          {request.dateKey}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">
+                          {request.fromTime} - {request.toTime}
+                        </div>
+                      </div>
+
+                      <span
+                        className={`px-2 py-1 rounded-md text-xs font-semibold ${
+                          request.status === "approved"
+                            ? "bg-green-500/20 text-green-400"
+                            : request.status === "rejected"
+                              ? "bg-red-500/20 text-red-400"
+                              : "bg-yellow-500/20 text-yellow-400"
+                        }`}
+                      >
+                        {isForgottenRequestApproved(request)
+                          ? "Approved"
+                          : request.status === "rejected"
+                            ? "Rejected"
+                            : "Pending"}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-300 mt-2">
+                      Reason: {request.reason}
+                    </div>
+
+                    {request.status === "approved" && (
+                      <div className="text-xs text-green-400 mt-2">
+                        Approved time has been added to your tracker.
+                      </div>
+                    )}
+
+                    {request.status === "rejected" && request.reviewNote && (
+                      <div className="text-xs text-red-400 mt-2">
+                        Rejection reason: {request.reviewNote}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -8285,8 +8801,8 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
                 )}
             </div>
             <p className="text-[11px] text-slate-500">
-              Times use this computer's clock. A reminder you close comes back
-              after {ALERT_SNOOZE_MINUTES} minutes if it is still needed.
+              Times use this computer's clock. Each reminder appears only once
+              at its set time.
             </p>
           </div>
         )}
