@@ -3825,6 +3825,7 @@ const allowedOrigins = [
   'http://localhost:3001',
   'https://localhost:3000',
   'https://localhost:3001',
+  
   'https://192.168.29.228:3000',
   'https://192.168.29.228:3001',
   ...extraAllowedOrigins,
@@ -6438,27 +6439,27 @@ app.get(
     }
   }
 );
-app.get('/api/forgotten-time-requests/:employeeId', (req, res) => {
-  try {
-    const employeeId = String(req.params.employeeId || '').trim();
+// app.get('/api/forgotten-time-requests/:employeeId', (req, res) => {
+//   try {
+//     const employeeId = String(req.params.employeeId || '').trim();
 
-    const requests = readForgottenTimeRequests()
-      .filter((request) => String(request.employeeId) === employeeId)
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() -
-          new Date(a.createdAt).getTime()
-      )
-      .map(publicForgottenTimeRequest);
+//     const requests = readForgottenTimeRequests()
+//       .filter((request) => String(request.employeeId) === employeeId)
+//       .sort(
+//         (a, b) =>
+//           new Date(b.createdAt).getTime() -
+//           new Date(a.createdAt).getTime()
+//       )
+//       .map(publicForgottenTimeRequest);
 
-    return res.json({ success: true, requests });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to load requests.',
-    });
-  }
-});
+//     return res.json({ success: true, requests });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       error: error.message || 'Failed to load requests.',
+//     });
+//   }
+// });
 // ======================================================
 // TRACKER TIME SAVE
 // ======================================================
@@ -6681,64 +6682,117 @@ app.get(
     res
   ) => {
     try {
+      const employeeId =
+        String(
+          req.params.employeeId || ''
+        ).trim();
+
+      if (!employeeId) {
+        return res.status(400).json({
+          success: false,
+          error: 'employeeId is required.',
+        });
+      }
+
       const tracker =
         readTracker();
 
       const employeeData =
-        tracker[
-          req.params.employeeId
-        ];
+        tracker[employeeId];
 
-      const records =
-        Object.entries(
-          employeeData?.dates ||
-            {}
-        )
-          .map(
-            ([
-              dateKey,
-              value,
-            ]) => ({
-              dateKey,
+      const liveDates =
+        employeeData?.dates || {};
 
-              totalSeconds:
-                Number(
-                  value?.totalSeconds ||
-                    0
-                ),
-
-              updatedAt:
-                value?.updatedAt ||
-                null,
-            })
-          )
-          .sort(
-            (
-              a,
-              b
-            ) =>
-              b.dateKey.localeCompare(
-                a.dateKey
-              )
+      const approvedRequests =
+        readForgottenTimeRequests()
+          .filter(
+            (request) =>
+              String(request.employeeId) ===
+                employeeId &&
+              request.status === 'approved'
           );
 
-      const totalSeconds =
+      const approvedDates =
+        approvedRequests.map(
+          (request) =>
+            String(request.dateKey)
+        );
+
+      const allDates =
+        Array.from(
+          new Set([
+            ...Object.keys(liveDates),
+            ...approvedDates,
+          ])
+        ).sort(
+          (a, b) =>
+            b.localeCompare(a)
+        );
+
+      const records =
+        allDates.map(
+          (dateKey) => {
+            const liveSeconds =
+              Math.max(
+                0,
+                Math.floor(
+                  Number(
+                    liveDates[dateKey]
+                      ?.totalSeconds || 0
+                  )
+                )
+              );
+
+            const approvedManualSeconds =
+              getApprovedManualSeconds(
+                employeeId,
+                dateKey
+              );
+
+            const totalSeconds =
+              liveSeconds +
+              approvedManualSeconds;
+
+            return {
+              dateKey,
+
+              totalSeconds,
+
+              liveSeconds,
+
+              approvedManualSeconds,
+
+              updatedAt:
+                liveDates[dateKey]
+                  ?.updatedAt || null,
+            };
+          }
+        );
+
+      const liveTotalSeconds =
         records.reduce(
-          (
-            total,
-            record
-          ) =>
+          (total, record) =>
             total +
-            record.totalSeconds,
+            record.liveSeconds,
           0
         );
 
-      return res.json({
-        success:
-          true,
+      const approvedManualTotalSeconds =
+        records.reduce(
+          (total, record) =>
+            total +
+            record.approvedManualSeconds,
+          0
+        );
 
-        employeeId:
-          req.params.employeeId,
+      const totalSeconds =
+        liveTotalSeconds +
+        approvedManualTotalSeconds;
+
+      return res.json({
+        success: true,
+
+        employeeId,
 
         employeeName:
           employeeData?.employeeName ||
@@ -6746,26 +6800,27 @@ app.get(
 
         records,
 
+        liveTotalSeconds,
+
+        approvedManualTotalSeconds,
+
         totalSeconds,
       });
-    } catch (
-      error
-    ) {
-      return res
-        .status(
-          500
-        )
-        .json({
-          success:
-            false,
+    } catch (error) {
+      console.error(
+        'Tracker history error:',
+        error
+      );
 
-          error:
-            error.message,
-        });
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          'Failed to load tracker history.',
+      });
     }
   }
 );
-
 // ======================================================
 // MONTH TRACKER
 // ======================================================
@@ -6828,17 +6883,29 @@ app.get(
               };
             }
           );
+const liveSeconds =
+  Math.max(
+    0,
+    Math.floor(
+      Number(
+        tracker[
+          employee.id
+        ]?.dates?.[
+          selectedDate
+        ]?.totalSeconds || 0
+      )
+    )
+  );
 
-      const totalSeconds =
-        records.reduce(
-          (
-            total,
-            record
-          ) =>
-            total +
-            record.totalSeconds,
-          0
-        );
+const approvedManualSeconds =
+  getApprovedManualSeconds(
+    employee.id,
+    selectedDate
+  );
+
+const totalSeconds =
+  liveSeconds +
+  approvedManualSeconds;
 
       return res.json({
         success:
@@ -6850,7 +6917,11 @@ app.get(
         monthKey:
           req.params.monthKey,
 
-        totalSeconds,
+totalSeconds,
+
+liveSeconds,
+
+approvedManualSeconds,
 
         records,
       });
