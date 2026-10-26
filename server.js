@@ -7237,6 +7237,10 @@ app.get(
 // ACTIVITY HISTORY
 // ======================================================
 
+// ======================================================
+// ACTIVITY HISTORY
+// ======================================================
+
 app.get(
   '/api/activity-history/:employeeId',
   (
@@ -7281,7 +7285,8 @@ app.get(
           employee
         );
 
-        const activityTotals = getDailyActivityTotals(employee.id);
+      // જૂની એક્ટિવિટી ટોટલ્સ (20 મિનિટ પહેલાની ફંક્શનાલિટી)
+      const activityTotals = getDailyActivityTotals(employee.id);
 
       const dates =
         Array.from(
@@ -7298,10 +7303,9 @@ app.get(
         dates.map(
           (
             dateKey
-          ) => ({
-            dateKey,
-
-            totalSeconds:
+          ) => {
+            // લાઈવ ટાઈમ (જે ટાઈમર ચાલુ હોય ત્યારે ગણાય છે)
+            const liveSeconds =
               Number(
                 tracker[
                   employee.id
@@ -7309,27 +7313,32 @@ app.get(
                   dateKey
                 ]?.totalSeconds ||
                   0
-              ),
+              );
 
-            screenshotCount:
-              getScreenshotCount(
-                employee,
+            // એડમિન દ્વારા અપ્રુવ થયેલો ફરગોટન ટાઈમ
+            const approvedManualSeconds =
+              getApprovedManualSeconds(
+                employee.id,
                 dateKey
-              ),
+              );
+
+            return {
+              dateKey,
+
+              // કુલ સમય = લાઈવ ટાઈમ + અપ્રુવ થયેલો સમય
+              totalSeconds:
+                liveSeconds + approvedManualSeconds,
+
+              screenshotCount:
+                getScreenshotCount(
+                  employee,
+                  dateKey
+                ),
+                
+              // જૂની એક્ટિવિટી ટોટલ્સ ઉમેરો
               ...(activityTotals[dateKey] || {}),
-  Number(
-    tracker[
-      employee.id
-    ]?.dates?.[
-      dateKey
-    ]?.totalSeconds ||
-      0
-  ) +
-  getApprovedManualSeconds(
-    employee.id,
-    dateKey
-  ),
-          })
+            };
+          }
         );
 
       return res.json({
