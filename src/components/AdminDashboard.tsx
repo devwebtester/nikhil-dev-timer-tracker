@@ -4039,6 +4039,7 @@ import {
 } from 'lucide-react';
 
 import { apiFetch } from '../lib/api';
+import { TimeActivityReport } from './TimeActivityReport';
 
 
 interface AdminDashboardProps {
@@ -4079,7 +4080,8 @@ type AdminTab =
   | 'employees'
   | 'approvals'
   | 'activity'
-  | 'storage';
+  | 'storage'
+  | 'reports';
 
 
 type ActivitySummaryRow = {
@@ -6100,6 +6102,10 @@ React.FC<AdminDashboardProps> = ({
             'storage',
             'Global Capture Settings',
           ],
+          [
+            'reports',
+            'Time & Activity Report',
+          ],
 
         ].map(
           ([key, label]) => (
@@ -6136,6 +6142,29 @@ React.FC<AdminDashboardProps> = ({
 
       </div>
 
+
+      {activeTab === 'reports' && (
+        <TimeActivityReport
+          fileName="work-report"
+          allowMemberSelect
+          members={centralUsers.map((u) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+          }))}
+          loadHistory={async (member) => {
+            const res = await apiFetch(
+              `/api/activity-history/${encodeURIComponent(member.id)}`,
+              { method: 'GET', cache: 'no-store' }
+            );
+            const data = await readApiJson(res);
+            if (!res.ok || !data?.success) {
+              throw new Error(data?.error || 'Failed to load history');
+            }
+            return Array.isArray(data.records) ? data.records : [];
+          }}
+        />
+      )}
 
       {/* ================================================================
           EMPLOYEES

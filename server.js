@@ -6616,11 +6616,14 @@ app.get(
           employee
         );
 
+        const activityTotals = getDailyActivityTotals(employee.id);
+
       const dates =
         Array.from(
           new Set([
             ...trackerDates,
             ...screenshotDates,
+            ...Object.keys(activityTotals),
           ])
         )
           .sort()
@@ -6648,6 +6651,7 @@ app.get(
                 employee,
                 dateKey
               ),
+              ...(activityTotals[dateKey] || {}),
           })
         );
 
@@ -7452,6 +7456,74 @@ function safeCount(value) {
   return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
 }
 
+function getDailyActivityTotals(employeeId) {
+  const result = {};
+  readActivitySnapshots()
+    .filter((row) => row.employeeId === employeeId)
+    .forEach((row) => {
+      const t = result[row.dateKey] || (result[row.dateKey] = {
+        activeSeconds: 0, trackedSeconds: 0,
+        mouseMoves: 0, mouseClicks: 0, keyPresses: 0,
+      });
+      t.activeSeconds += safeCount(row.activeSeconds);
+      t.trackedSeconds += safeCount(row.trackedSeconds);
+      t.mouseMoves += safeCount(row.mouseMoves);
+      t.mouseClicks += safeCount(row.mouseClicks);
+      t.keyPresses += safeCount(row.keyPresses);
+    });
+  Object.values(result).forEach((t) => {
+    t.activityPercent = t.trackedSeconds > 0
+      ? Math.min(100, Math.round((t.activeSeconds / t.trackedSeconds) * 100))
+      : null;
+  });
+  return result;
+}
+
+// app.post('/api/activity-snapshot', (req, res) => {
+//   try {
+//     const activityTotals = getDailyActivityTotals(employee.id);
+//     const employeeId = String(req.body?.employeeId || '').trim();
+//     const dateKey = String(req.body?.dateKey || '').trim();
+//     const screenshotKey = safeSegment(req.body?.screenshotKey, '');
+//     const capturedAt = String(req.body?.capturedAt || new Date().toISOString());
+
+//     if (!employeeId || !isValidDateKey(dateKey) || !screenshotKey) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'employeeId, valid dateKey (YYYY-MM-DD), and screenshotKey are required.',
+//       });
+//     }
+
+//     const snapshot = {
+//       employeeId,
+//       employeeName: String(req.body?.employeeName || ''),
+//       dateKey,
+//       screenshotKey,
+//       capturedAt,
+//       mouseMoves: safeCount(req.body?.mouseMoves),
+//       mouseClicks: safeCount(req.body?.mouseClicks),
+//       keyPresses: safeCount(req.body?.keyPresses),
+//       activeSeconds: safeCount(req.body?.activeSeconds),
+//       trackedSeconds: safeCount(req.body?.trackedSeconds),
+//     };
+
+//     const rows = readActivitySnapshots();
+//     const existingIndex = rows.findIndex((row) =>
+//       row.employeeId === employeeId &&
+//       row.dateKey === dateKey &&
+//       row.screenshotKey === screenshotKey
+//     );
+
+//     if (existingIndex >= 0) rows[existingIndex] = snapshot;
+//     else rows.push(snapshot);
+
+//     writeActivitySnapshots(rows);
+//     return res.json({ success: true, snapshot });
+//   } catch (error) {
+//     console.error('Activity snapshot save error:', error);
+//     return res.status(500).json({ success: false, error: error?.message || 'Could not save activity snapshot.' });
+//   }
+// });
 app.post('/api/activity-snapshot', (req, res) => {
   try {
     const employeeId = String(req.body?.employeeId || '').trim();

@@ -5426,6 +5426,64 @@ async function handleApi(
         );
     }
 
+        // Activity totals per day, taken from activity_snapshots.
+    try {
+      const activityRows =
+        await env.DB
+          .prepare(`
+            SELECT
+              date_key,
+              COUNT(*) AS snapshot_count,
+              SUM(active_seconds) AS active_seconds,
+              SUM(tracked_seconds) AS tracked_seconds,
+              SUM(mouse_moves) AS mouse_moves,
+              SUM(mouse_clicks) AS mouse_clicks,
+              SUM(key_presses) AS key_presses
+            FROM activity_snapshots
+            WHERE employee_id = ?
+            GROUP BY date_key
+          `)
+          .bind(employeeId)
+          .all();
+
+      for (const row of activityRows.results || []) {
+        const dateKey = row.date_key;
+        if (!isDateKey(dateKey)) {
+          continue;
+        }
+
+        if (!byDate.has(dateKey)) {
+          byDate.set(dateKey, {
+            dateKey,
+            totalSeconds: 0,
+            screenshotCount: 0,
+          });
+        }
+
+        const record = byDate.get(dateKey);
+        const activeSeconds = Number(row.active_seconds || 0);
+        const trackedSeconds = Number(row.tracked_seconds || 0);
+
+        record.activeSeconds = activeSeconds;
+        record.trackedSeconds = trackedSeconds;
+        record.activityPercent =
+          trackedSeconds > 0
+            ? Math.min(100, Math.round((activeSeconds / trackedSeconds) * 100))
+            : null;
+        record.mouseMoves = Number(row.mouse_moves || 0);
+        record.mouseClicks = Number(row.mouse_clicks || 0);
+        record.keyPresses = Number(row.key_presses || 0);
+
+        // Screenshots reach screenshot_index only after the hourly cloud
+        // upload, so use the snapshot count if it is higher.
+        record.screenshotCount = Math.max(
+          Number(record.screenshotCount || 0),
+          Number(row.snapshot_count || 0)
+        );
+      }
+    } catch (activityError) {
+      console.warn('Activity history aggregation failed:', activityError);
+    }
 
     const records =
       Array.from(

@@ -4315,6 +4315,7 @@ import {
   uploadScreenshotLocally,
 } from "../lib/localStorageService";
 import { setCachedScreenshot } from "../lib/screenshotCache";
+import { TimeActivityReport } from "./TimeActivityReport";
 
 // ======================================================
 // BACKEND
@@ -8818,6 +8819,53 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
           </div>
         </div>
       )}
+
+            {/* TIME & ACTIVITY REPORT (own data only) */}
+      <TimeActivityReport
+        fileName="my-work-report"
+        title="My time and activity report"
+        allowMemberSelect={false}
+        members={[
+          {
+            id: currentUser.id,
+            name: currentUser.name,
+            email: currentUser.email,
+          },
+        ]}
+        loadHistory={async (member) => {
+          const res = await fetch(
+            `${backendUrl}/api/activity-history/${encodeURIComponent(member.id)}`,
+            { cache: "no-store", headers: backendHeaders },
+          );
+          const data = await readApiJson(res);
+          if (!res.ok || !data?.success) {
+            throw new Error(data?.error || "Failed to load history");
+          }
+          const records: any[] = Array.isArray(data.records)
+            ? [...data.records]
+            : [];
+
+          // Today's live timer value can be ahead of the server, so merge it.
+          const todayKey = getTodayDateKey();
+          const index = records.findIndex((r) => r.dateKey === todayKey);
+          if (index >= 0) {
+            records[index] = {
+              ...records[index],
+              totalSeconds: Math.max(
+                Number(records[index].totalSeconds) || 0,
+                dayTotalSeconds,
+              ),
+            };
+          } else if (dayTotalSeconds > 0) {
+            records.push({
+              dateKey: todayKey,
+              totalSeconds: dayTotalSeconds,
+              screenshotCount: 0,
+            });
+          }
+          return records;
+        }}
+      />
 
       {/* HIDDEN VIDEO */}
       <video
