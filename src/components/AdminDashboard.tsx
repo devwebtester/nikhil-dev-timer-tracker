@@ -6717,11 +6717,12 @@ React.FC<AdminDashboardProps> = ({
                 (emp) => {
 
                   const summary =
-                    summaryRows.find(
-                      (r) =>
-                        r.employeeId ===
-                        emp.id
-                    );
+  summaryRows.find(
+    (r) =>
+      String(r.employeeId) === String(emp.id) ||
+      String(r.email).toLowerCase() ===
+        String(emp.email).toLowerCase()
+  );
 
 
                   return (
