@@ -3972,6 +3972,12 @@ const DEFAULT_CAPTURE_SETTINGS = {
     900,
   ],
 
+  idleDurationSeconds:
+    30,
+
+  idlePopupCountdownSeconds:
+    10,
+
   updatedAt:
     new Date().toISOString(),
 };
@@ -6364,6 +6370,36 @@ app.post(
             Math.round(
               windowSeconds /
                 60
+            )
+          ),
+
+        idleDurationSeconds:
+          Math.max(
+            5,
+            Math.min(
+              86400,
+              Math.floor(
+                Number(
+                  req.body?.idleDurationSeconds ??
+                    current.idleDurationSeconds ??
+                    30
+                )
+              ) || 30
+            )
+          ),
+
+        idlePopupCountdownSeconds:
+          Math.max(
+            1,
+            Math.min(
+              3600,
+              Math.floor(
+                Number(
+                  req.body?.idlePopupCountdownSeconds ??
+                    current.idlePopupCountdownSeconds ??
+                    10
+                )
+              ) || 10
             )
           ),
 

@@ -4107,6 +4107,30 @@ async function handleApi(
   // LOGIN BOOTSTRAP DATA
   // ====================================================
 
+  async function ensureIdlePopupSettingsSchema() {
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS idle_popup_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        idle_duration_seconds INTEGER NOT NULL DEFAULT 30,
+        popup_countdown_seconds INTEGER NOT NULL DEFAULT 10,
+        updated_at TEXT
+      )
+    `).run();
+  }
+
+  async function getIdlePopupSettings() {
+    await ensureIdlePopupSettingsSchema();
+    const row = await env.DB.prepare(`
+      SELECT idle_duration_seconds, popup_countdown_seconds, updated_at
+      FROM idle_popup_settings WHERE id = 1
+    `).first();
+    return {
+      idleDurationSeconds: Math.max(5, Math.min(86400, Number(row?.idle_duration_seconds || 30))),
+      idlePopupCountdownSeconds: Math.max(1, Math.min(3600, Number(row?.popup_countdown_seconds || 10))),
+      idleSettingsUpdatedAt: row?.updated_at || null,
+    };
+  }
+
   async function getCaptureSettingsRow() {
     const row = await env.DB
       .prepare(`
@@ -4126,6 +4150,7 @@ async function handleApi(
       autoCaptureIntervalMinutes: Math.max(1, Math.round(Number(row?.capture_window_seconds || 600) / 60)),
       allowedIntervals: [10, 60, 120, 300, 600, 900],
       updatedAt: row?.updated_at || null,
+      ...(await getIdlePopupSettings()),
     };
   }
 
@@ -5857,6 +5882,7 @@ async function handleApi(
           row
             ?.updated_at ||
           null,
+        ...(await getIdlePopupSettings()),
       },
     });
   }
@@ -5968,11 +5994,39 @@ async function handleApi(
       )
       .run();
 
+    const idleDurationSeconds = Math.max(
+      5,
+      Math.min(86400, Math.floor(Number(body.idleDurationSeconds ?? 30) || 30))
+    );
+    const idlePopupCountdownSeconds = Math.max(
+      1,
+      Math.min(3600, Math.floor(Number(body.idlePopupCountdownSeconds ?? 10) || 10))
+    );
+
+    await ensureIdlePopupSettingsSchema();
+    await env.DB.prepare(`
+      INSERT INTO idle_popup_settings (
+        id, idle_duration_seconds, popup_countdown_seconds, updated_at
+      ) VALUES (1, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        idle_duration_seconds = excluded.idle_duration_seconds,
+        popup_countdown_seconds = excluded.popup_countdown_seconds,
+        updated_at = excluded.updated_at
+    `).bind(
+      idleDurationSeconds,
+      idlePopupCountdownSeconds,
+      updatedAt
+    ).run();
+
 
     return json({
       success: true,
 
       settings: {
+        idleDurationSeconds,
+        idlePopupCountdownSeconds,
+        idleSettingsUpdatedAt: updatedAt,
+
         captureMode:
           'random_count_window',
 

@@ -131,7 +131,14 @@ export default defineConfig(({ command }) => {
       watch:
         process.env.DISABLE_HMR === 'true'
           ? null
-          : {},
+          : {
+        ignored: [
+          '**/.wrangler/**',
+          '**/data/**',
+          '**/dist/**',
+          '**/node_modules/**',
+        ],
+      },
     },
   };
 });

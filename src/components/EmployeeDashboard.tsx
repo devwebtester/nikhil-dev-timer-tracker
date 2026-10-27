@@ -4591,8 +4591,15 @@ const normalizeActivityCounts = (
 const GLOBAL_AGENT_URL = "http://127.0.0.1:3210";
 
 const callGlobalActivityAgent = async (
-  action: "start" | "pause" | "resume" | "stop" | "snapshot",
-): Promise<Partial<ScreenshotActivityCounts> | null> => {
+  action: "start" | "pause" | "resume" | "stop" | "snapshot" | "status",
+): Promise<
+  | (Partial<ScreenshotActivityCounts> & {
+      idlePausePending?: boolean;
+      tracking?: boolean;
+      paused?: boolean;
+    })
+  | null
+> => {
   try {
     const response = await fetch(`${GLOBAL_AGENT_URL}/${action}`, {
       method: "POST",
@@ -4605,6 +4612,25 @@ const callGlobalActivityAgent = async (
     return action === "snapshot" ? data?.counts || null : data;
   } catch {
     return null;
+  }
+};
+
+let latestIdleSettings: any = null;
+
+const syncIdleSettingsToLocalAgent = async (settings: any) => {
+  latestIdleSettings = settings;
+  try {
+    await fetch(`${GLOBAL_AGENT_URL}/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idleDurationSeconds: Math.max(5, Number(settings?.idleDurationSeconds || 30)),
+        idlePopupCountdownSeconds: Math.max(1, Number(settings?.idlePopupCountdownSeconds || 10)),
+      }),
+      cache: "no-store",
+    });
+  } catch {
+    // Local agent may not be running; browser tracking continues normally.
   }
 };
 
@@ -6559,6 +6585,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
       }
 
       const settings = data.settings;
+      void syncIdleSettingsToLocalAgent(settings);
       const newWindow = Math.max(
         5,
         Number(
@@ -6931,7 +6958,9 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
     const stream = await initScreenStream();
 
     // Start a fresh activity interval (Windows agent + in-page fallback).
-    void callGlobalActivityAgent("start");
+    void callGlobalActivityAgent("start").then(() => {
+      if (latestIdleSettings) void syncIdleSettingsToLocalAgent(latestIdleSettings);
+    });
     activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
     lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
     browserActivityRef.current = {
@@ -6980,6 +7009,50 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
     clearCaptureTimers();
     scheduleRandomWindow(captureWindowRef.current, screenshotCountRef.current);
   };
+
+  // ====================================================
+  // IDLE POPUP RESULT -> PAUSE TRACKING
+  // ====================================================
+
+  useEffect(() => {
+    if (!isTracking || isPaused) return;
+
+    let cancelled = false;
+    let checking = false;
+
+    const checkIdlePause = async () => {
+      if (checking || cancelled || pausedRef.current) return;
+      checking = true;
+      try {
+        const status = await callGlobalActivityAgent("status");
+        if (cancelled || pausedRef.current) return;
+        if (status?.idlePausePending !== true || status?.paused !== true) return;
+
+        const latest = await callGlobalActivityAgent("status");
+        if (cancelled || pausedRef.current) return;
+        if (latest?.idlePausePending !== true || latest?.paused !== true) return;
+
+        await pauseTracking();
+        if (!cancelled) {
+          setLastStatus("Tracking paused because no activity was detected.");
+        }
+      } catch (error) {
+        console.error("Could not check idle status:", error);
+      } finally {
+        checking = false;
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void checkIdlePause();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTracking, isPaused]);
 
   // ====================================================
   // PAUSE

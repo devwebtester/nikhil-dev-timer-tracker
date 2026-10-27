@@ -4468,6 +4468,10 @@ React.FC<AdminDashboardProps> = ({
   ] =
     useState<number>(20);
 
+  // Idle popup policy (managed centrally by the administrator).
+  const [idleDurationSeconds, setIdleDurationSeconds] = useState<number>(30);
+  const [idlePopupCountdownSeconds, setIdlePopupCountdownSeconds] = useState<number>(10);
+
 
   // Login already provided the initial admin data. Do not start polling.
   useEffect(() => {
@@ -4499,6 +4503,8 @@ React.FC<AdminDashboardProps> = ({
       setCaptureWindowSeconds(Math.max(5, Number(settings.captureWindowSeconds || 600)));
       setScreenshotsPerWindow(Math.max(1, Number(settings.screenshotsPerWindow || 5)));
       setPresetId(String(settings.presetId || 'custom'));
+      setIdleDurationSeconds(Math.max(5, Number(settings.idleDurationSeconds || 30)));
+      setIdlePopupCountdownSeconds(Math.max(1, Number(settings.idlePopupCountdownSeconds || 10)));
     }
   }, []);
 
@@ -4826,6 +4832,9 @@ React.FC<AdminDashboardProps> = ({
           'custom'
         )
       );
+
+      setIdleDurationSeconds(Math.max(5, Number(settings.idleDurationSeconds || 30)));
+      setIdlePopupCountdownSeconds(Math.max(1, Number(settings.idlePopupCountdownSeconds || 10)));
 
 
       if (
@@ -5579,6 +5588,8 @@ React.FC<AdminDashboardProps> = ({
                   allowedIntervals,
 
                   lockIntervalForEmployees,
+                  idleDurationSeconds,
+                  idlePopupCountdownSeconds,
                 }),
             }
           );
@@ -7528,6 +7539,57 @@ React.FC<AdminDashboardProps> = ({
           p-6
           space-y-6
         ">
+
+          <div className="rounded-xl border border-amber-200 dark:border-amber-900 p-5 space-y-4">
+            <div>
+              <h2 className="text-lg font-bold">Idle Timer Settings</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Set how long an employee can be inactive (no mouse/keyboard) before the desktop popup appears,
+                and how many seconds they have to respond before tracking pauses. Click "Save Global Settings" to apply.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-sm font-semibold">
+                Idle time before popup (minutes)
+                <input
+                  type="number"
+                  min={0.5}
+                  max={1440}
+                  step={0.5}
+                  value={Number((idleDurationSeconds / 60).toFixed(2))}
+                  onChange={(e) => {
+                    captureEditingRef.current = true;
+                    const minutes = Math.max(0.5, Math.min(1440, Number(e.target.value) || 0.5));
+                    setIdleDurationSeconds(Math.round(minutes * 60));
+                  }}
+                  className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  Current: {idleDurationSeconds >= 60
+                    ? `${Number((idleDurationSeconds / 60).toFixed(2))} min`
+                    : `${idleDurationSeconds} sec`}
+                </span>
+              </label>
+              <label className="block text-sm font-semibold">
+                Popup auto-close time (seconds)
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  step={1}
+                  value={idlePopupCountdownSeconds}
+                  onChange={(e) => {
+                    captureEditingRef.current = true;
+                    setIdlePopupCountdownSeconds(Math.max(1, Math.min(3600, Math.floor(Number(e.target.value)) || 1)));
+                  }}
+                  className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  If the employee does not answer within this time, the popup closes and tracking pauses.
+                </span>
+              </label>
+            </div>
+          </div>
 
           <div>
 
