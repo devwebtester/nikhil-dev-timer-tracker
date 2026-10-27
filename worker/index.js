@@ -4807,7 +4807,7 @@ async function handleApi(
     return json({ success: true, event: { id: eventId, employeeId, eventType, eventAt, dateKey } });
   }
 
-  // ====================================================
+    // ====================================================
   // TRACKER SAVE
   // ====================================================
 
@@ -4910,7 +4910,7 @@ async function handleApi(
         ON CONFLICT(employee_id, date_key)
         DO UPDATE SET
           employee_name = excluded.employee_name,
-          total_seconds = excluded.total_seconds,
+          total_seconds = ?,
           updated_at = excluded.updated_at
       `)
       .bind(
@@ -4919,7 +4919,8 @@ async function handleApi(
         body.employeeName ||
           'Employee',
         finalSeconds,
-        updatedAt
+        updatedAt,
+        finalSeconds // ✅ Bound explicitly to ensure the highest number wins
       )
       .run();
 
@@ -4935,8 +4936,6 @@ async function handleApi(
         finalSeconds,
     });
   }
-
-
   // ====================================================
   // TRACKER BY DATE
   // ====================================================

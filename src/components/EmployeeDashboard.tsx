@@ -6141,26 +6141,39 @@ if (forgottenToTime === forgottenFromTime) {
   // CENTRAL TRACKER SYNC
   // ====================================================
 
-  const syncTrackerTime = async (seconds = daySecondsRef.current) => {
+    const syncTrackerTime = async (seconds = daySecondsRef.current) => {
     try {
-      // Send only the time the timer really tracked. Admin-approved forgotten
-      // time is kept separately on the server, so it is not sent twice.
+      // 1. Ask the server what the current saved time is
+      let serverSeconds = 0;
+      try {
+        const res = await fetch(
+          `${backendUrl}/api/activity/${encodeURIComponent(currentUser.id)}/${getTodayDateKey()}`,
+          { cache: "no-store", headers: backendHeaders }
+        );
+        const data = await readApiJson(res);
+        if (data?.success) serverSeconds = Number(data.totalSeconds || 0);
+      } catch (e) {
+        console.warn("Could not check server time", e);
+      }
+
+      // 2. Check the local timer
       const liveSeconds = Math.max(
         0,
-        Math.floor(seconds) - readAppliedApprovedSeconds(),
+        Math.floor(seconds) - readAppliedApprovedSeconds()
       );
 
+      // 3. Use whichever is HIGHER (This stops 0 from overwriting 22h)
+      const safeSeconds = Math.max(liveSeconds, serverSeconds);
+
+      // 4. Send the safe number to the backend
       const response = await fetch(`${backendUrl}/api/tracker-time`, {
         method: "POST",
-        headers: {
-          ...backendHeaders,
-          "Content-Type": "application/json",
-        },
+        headers: { ...backendHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
           employeeId: currentUser.id,
           employeeName: currentUser.name,
           dateKey: getTodayDateKey(),
-          totalSeconds: liveSeconds,
+          totalSeconds: safeSeconds,
         }),
       });
 
@@ -6168,7 +6181,7 @@ if (forgottenToTime === forgottenFromTime) {
       if (!response.ok || !data?.success) {
         throw new Error(data?.error || "Tracker sync failed");
       }
-      return Number(data.totalSeconds || seconds);
+      return Number(data.totalSeconds || safeSeconds);
     } catch (error) {
       console.warn("Tracker sync warning:", error);
       return seconds;
