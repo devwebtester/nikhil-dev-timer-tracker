@@ -9458,10 +9458,10 @@ app.get('/api/activity-snapshots/:employeeId/:dateKey', (req, res) => {
 
 const uploadBatchMemory = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 30, fileSize: 15 * 1024 * 1024 },
+  limits: { files: 50, fileSize: 15 * 1024 * 1024 },
 });
 
-app.post('/api/upload-screenshot-batch', uploadBatchMemory.array('files', 30), (req, res) => {
+app.post('/api/upload-screenshot-batch', uploadBatchMemory.array('files', 50), (req, res) => {
   try {
     let metadata;
     try {
