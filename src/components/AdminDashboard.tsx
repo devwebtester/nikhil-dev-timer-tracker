@@ -4254,21 +4254,30 @@ const readAdminBootstrap = () => {
    ADMIN DASHBOARD
 ========================================================================== */
 
-export const AdminDashboard:
-React.FC<AdminDashboardProps> = ({
+// export const AdminDashboard:
+// React.FC<AdminDashboardProps> = ({
 
+//   adminUser,
+
+//   allUsers,
+
+//   onUpdateUsers,
+
+//   pendingSignups,
+
+//   onUpdatePendingSignups,
+
+//   storageSettings,
+
+// }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   adminUser,
-
   allUsers,
-
   onUpdateUsers,
-
   pendingSignups,
-
   onUpdatePendingSignups,
-
   storageSettings,
-
+  onUpdateStorageSettings,
 }) => {
 
   const captureEditingRef =
