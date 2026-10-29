@@ -30,6 +30,7 @@
 //   'http://localhost:3001',
 //   'https://localhost:3000',
 //   'https://localhost:3001',
+  
 //   'https://192.168.29.228:3000',
 //   'https://192.168.29.228:3001',
 //   ...extraAllowedOrigins,
@@ -141,7 +142,10 @@
 //     UPLOAD_DIR,
 //     'capture-settings.json'
 //   );
-
+// const FORGOTTEN_TIME_DB = path.join(
+//   UPLOAD_DIR,
+//   'forgotten-time-requests.json'
+// );
 // // ======================================================
 // // DEFAULT CAPTURE SETTINGS
 // // ======================================================
@@ -240,7 +244,74 @@
 //     );
 //   }
 // }
+// function readForgottenTimeRequests() {
+//   return readArray(
+//     FORGOTTEN_TIME_DB,
+//     'forgotten time requests'
+//   );
+// }
 
+// function saveForgottenTimeRequests(data) {
+//   writeJson(
+//     FORGOTTEN_TIME_DB,
+//     data
+//   );
+// }
+
+// function parseTimeToMinutes(value) {
+//   const text = String(value || '').trim();
+
+//   if (!text) return null;
+
+//   const match = text.match(/^(\d{1,2}):(\d{2})$/);
+
+//   if (!match) return null;
+
+//   const hours = Number(match[1]);
+//   const minutes = Number(match[2]);
+
+//   if (
+//     !Number.isInteger(hours) ||
+//     !Number.isInteger(minutes) ||
+//     hours < 0 ||
+//     hours > 23 ||
+//     minutes < 0 ||
+//     minutes > 59
+//   ) {
+//     return null;
+//   }
+
+//   return hours * 60 + minutes;
+// }
+
+// function calculateManualDurationSeconds(fromTime, toTime) {
+//   const fromMinutes = parseTimeToMinutes(fromTime);
+//   const toMinutes = parseTimeToMinutes(toTime);
+
+//   if (fromMinutes === null || toMinutes === null) {
+//     return null;
+//   }
+
+//   if (toMinutes <= fromMinutes) {
+//     return null;
+//   }
+
+//   return (toMinutes - fromMinutes) * 60;
+// }
+
+// function publicForgottenTimeRequest(request) {
+//   return {
+//     ...request,
+//     requestedSeconds: Math.max(
+//       0,
+//       Math.floor(Number(request.requestedSeconds) || 0)
+//     ),
+//     approvedSeconds: Math.max(
+//       0,
+//       Math.floor(Number(request.approvedSeconds) || 0)
+//     ),
+//   };
+// }
 // ensureArrayFile(
 //   EMPLOYEE_DB
 // );
@@ -258,7 +329,7 @@
 //   CAPTURE_SETTINGS_DB,
 //   DEFAULT_CAPTURE_SETTINGS
 // );
-
+// ensureArrayFile(FORGOTTEN_TIME_DB);
 // function readArray(
 //   filePath,
 //   label
@@ -2002,7 +2073,598 @@
 //     }
 //   }
 // );
+// // ======================================================
+// // FORGOTTEN TIMER - CREATE REQUEST
+// // ======================================================
 
+// app.post(
+//   '/api/forgotten-time-requests',
+//   (req, res) => {
+//     try {
+//       const {
+//         employeeId,
+//         employeeName,
+//         dateKey,
+//         fromTime,
+//         toTime,
+//         reason,
+//       } = req.body || {};
+
+//       if (!employeeId) {
+//         return res.status(400).json({
+//           success: false,
+//           error: 'employeeId is required.',
+//         });
+//       }
+
+//       if (!isValidDateKey(dateKey)) {
+//         return res.status(400).json({
+//           success: false,
+//           error: 'A valid date is required.',
+//         });
+//       }
+
+//       const cleanFromTime =
+//         String(fromTime || '').trim();
+
+//       const cleanToTime =
+//         String(toTime || '').trim();
+
+//       if (
+//         !cleanFromTime ||
+//         !cleanToTime
+//       ) {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'From time and To time are required.',
+//         });
+//       }
+
+//       const cleanReason =
+//         String(reason || '').trim();
+
+//       if (!cleanReason) {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'Please explain why the timer was not started.',
+//         });
+//       }
+
+//       const employee =
+//         findEmployeeById(employeeId);
+
+//       if (!employee) {
+//         return res.status(404).json({
+//           success: false,
+//           error: 'Employee not found.',
+//         });
+//       }
+
+//       const requestedSeconds =
+//         calculateManualDurationSeconds(
+//           cleanFromTime,
+//           cleanToTime
+//         );
+
+//       if (
+//         requestedSeconds === null ||
+//         requestedSeconds <= 0
+//       ) {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'To time must be later than From time.',
+//         });
+//       }
+
+//       if (
+//         requestedSeconds >
+//         24 * 60 * 60
+//       ) {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'Forgotten timer duration cannot exceed 24 hours.',
+//         });
+//       }
+
+//       const requests =
+//         readForgottenTimeRequests();
+
+//       const duplicate =
+//         requests.find(
+//           (request) =>
+//             String(request.employeeId) ===
+//               String(employeeId) &&
+//             request.dateKey ===
+//               String(dateKey) &&
+//             request.fromTime ===
+//               cleanFromTime &&
+//             request.toTime ===
+//               cleanToTime &&
+//             request.status === 'pending'
+//         );
+
+//       if (duplicate) {
+//         return res.status(409).json({
+//           success: false,
+//           error:
+//             'A matching forgotten timer request is already pending.',
+//         });
+//       }
+
+//       const request = {
+//         id:
+//           `forgotten-${Date.now()}-${Math.random()
+//             .toString(36)
+//             .slice(2, 9)}`,
+
+//         employeeId:
+//           String(employeeId).trim(),
+
+//         employeeName:
+//           String(
+//             employeeName ||
+//               getEmployeeFullName(employee)
+//           ).trim(),
+
+//         employeeEmail:
+//           employee.email,
+
+//         dateKey:
+//           String(dateKey).trim(),
+
+//         fromTime:
+//           cleanFromTime,
+
+//         toTime:
+//           cleanToTime,
+
+//         requestedSeconds,
+
+//         approvedSeconds: 0,
+
+//         reason:
+//           cleanReason,
+
+//         status: 'pending',
+
+//         createdAt:
+//           new Date().toISOString(),
+
+//         reviewedAt: null,
+
+//         reviewedBy: null,
+
+//         reviewReason: '',
+//       };
+
+//       requests.push(request);
+
+//       saveForgottenTimeRequests(
+//         requests
+//       );
+
+//       return res.status(201).json({
+//         success: true,
+//         request:
+//           publicForgottenTimeRequest(
+//             request
+//           ),
+//         message:
+//           'Forgotten timer request submitted successfully.',
+//       });
+//     } catch (error) {
+//       console.error(
+//         'Create forgotten timer request error:',
+//         error
+//       );
+
+//       return res.status(500).json({
+//         success: false,
+//         error:
+//           error.message ||
+//           'Failed to create forgotten timer request.',
+//       });
+//     }
+//   }
+// );
+// // ======================================================
+// // FORGOTTEN TIMER - ADMIN REQUEST LIST
+// // ======================================================
+
+// app.get(
+//   '/api/forgotten-time-requests',
+//   (req, res) => {
+//     try {
+//       const requests =
+//         readForgottenTimeRequests();
+
+//       const sortedRequests =
+//         requests
+//           .slice()
+//           .sort(
+//             (a, b) =>
+//               new Date(b.createdAt).getTime() -
+//               new Date(a.createdAt).getTime()
+//           )
+//           .map(
+//             publicForgottenTimeRequest
+//           );
+
+//       return res.json({
+//         success: true,
+//         requests: sortedRequests,
+//       });
+//     } catch (error) {
+//       console.error(
+//         'Get admin forgotten timer requests error:',
+//         error
+//       );
+
+//       return res.status(500).json({
+//         success: false,
+//         error:
+//           error.message ||
+//           'Failed to load forgotten timer requests.',
+//       });
+//     }
+//   }
+// );
+// // ======================================================
+// // FORGOTTEN TIMER - ADMIN APPROVE
+// // ======================================================
+
+// app.post(
+//   '/api/forgotten-time-requests/:id/approve',
+//   (req, res) => {
+//     try {
+//       const requestId =
+//         String(req.params.id || '').trim();
+
+//       if (!requestId) {
+//         return res.status(400).json({
+//           success: false,
+//           error: 'Request ID is required.',
+//         });
+//       }
+
+//       const requests =
+//         readForgottenTimeRequests();
+
+//       const requestIndex =
+//         requests.findIndex(
+//           (item) =>
+//             String(item.id) === requestId
+//         );
+
+//       if (requestIndex === -1) {
+//         return res.status(404).json({
+//           success: false,
+//           error:
+//             'Forgotten timer request not found.',
+//         });
+//       }
+
+//       const request =
+//         requests[requestIndex];
+
+//       if (request.status === 'approved') {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'This forgotten timer request is already approved.',
+//         });
+//       }
+
+//       if (request.status === 'rejected') {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'A rejected request cannot be approved.',
+//         });
+//       }
+
+//       const approvedSeconds =
+//         Math.min(
+//           Math.max(
+//             0,
+//             Math.floor(
+//               Number(
+//                 request.requestedSeconds
+//               ) || 0
+//             )
+//           ),
+//           24 * 60 * 60
+//         );
+
+//       request.status = 'approved';
+
+//       request.approvedSeconds =
+//         approvedSeconds;
+
+//       request.reviewedAt =
+//         new Date().toISOString();
+
+//       request.reviewedBy =
+//         String(
+//           req.body?.reviewedBy ||
+//             'Admin'
+//         ).trim();
+
+//       request.reviewReason =
+//         String(
+//           req.body?.reviewReason || ''
+//         ).trim();
+
+//       requests[requestIndex] =
+//         request;
+
+//       saveForgottenTimeRequests(
+//         requests
+//       );
+
+//       return res.json({
+//         success: true,
+//         message:
+//           'Forgotten timer request approved successfully.',
+//         request:
+//           publicForgottenTimeRequest(
+//             request
+//           ),
+//       });
+//     } catch (error) {
+//       console.error(
+//         'Approve forgotten timer request error:',
+//         error
+//       );
+
+//       return res.status(500).json({
+//         success: false,
+//         error:
+//           error.message ||
+//           'Failed to approve forgotten timer request.',
+//       });
+//     }
+//   }
+// );
+
+// // ======================================================
+// // FORGOTTEN TIMER - APPROVED SECONDS HELPERS
+// // ======================================================
+
+// function getApprovedManualSeconds(
+//   employeeId,
+//   dateKey
+// ) {
+//   const requests =
+//     readForgottenTimeRequests();
+
+//   return requests
+//     .filter(
+//       (request) =>
+//         String(request.employeeId) ===
+//           String(employeeId) &&
+//         String(request.dateKey) ===
+//           String(dateKey) &&
+//         request.status === 'approved'
+//     )
+//     .reduce(
+//       (total, request) =>
+//         total +
+//         Math.max(
+//           0,
+//           Math.floor(
+//             Number(
+//               request.approvedSeconds
+//             ) || 0
+//           )
+//         ),
+//       0
+//     );
+// }
+
+// function getApprovedManualSecondsForEmployee(
+//   employeeId
+// ) {
+//   const requests =
+//     readForgottenTimeRequests();
+
+//   return requests
+//     .filter(
+//       (request) =>
+//         String(request.employeeId) ===
+//           String(employeeId) &&
+//         request.status === 'approved'
+//     )
+//     .reduce(
+//       (total, request) =>
+//         total +
+//         Math.max(
+//           0,
+//           Math.floor(
+//             Number(
+//               request.approvedSeconds
+//             ) || 0
+//           )
+//         ),
+//       0
+//     );
+// }
+// // ======================================================
+// // FORGOTTEN TIMER - ADMIN REJECT
+// // ======================================================
+
+// app.post(
+//   '/api/forgotten-time-requests/:id/reject',
+//   (req, res) => {
+//     try {
+//       const requestId =
+//         String(req.params.id || '').trim();
+
+//       if (!requestId) {
+//         return res.status(400).json({
+//           success: false,
+//           error: 'Request ID is required.',
+//         });
+//       }
+
+//       const requests =
+//         readForgottenTimeRequests();
+
+//       const requestIndex =
+//         requests.findIndex(
+//           (item) =>
+//             String(item.id) === requestId
+//         );
+
+//       if (requestIndex === -1) {
+//         return res.status(404).json({
+//           success: false,
+//           error:
+//             'Forgotten timer request not found.',
+//         });
+//       }
+
+//       const request =
+//         requests[requestIndex];
+
+//       if (request.status === 'approved') {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'An approved request cannot be rejected.',
+//         });
+//       }
+
+//       if (request.status === 'rejected') {
+//         return res.status(400).json({
+//           success: false,
+//           error:
+//             'This forgotten timer request is already rejected.',
+//         });
+//       }
+
+//       request.status = 'rejected';
+
+//       request.approvedSeconds = 0;
+
+//       request.reviewedAt =
+//         new Date().toISOString();
+
+//       request.reviewedBy =
+//         String(
+//           req.body?.reviewedBy ||
+//             'Admin'
+//         ).trim();
+
+//       request.reviewReason =
+//         String(
+//           req.body?.reviewReason || ''
+//         ).trim();
+
+//       requests[requestIndex] =
+//         request;
+
+//       saveForgottenTimeRequests(
+//         requests
+//       );
+
+//       return res.json({
+//         success: true,
+//         message:
+//           'Forgotten timer request rejected successfully.',
+//         request:
+//           publicForgottenTimeRequest(
+//             request
+//           ),
+//       });
+//     } catch (error) {
+//       console.error(
+//         'Reject forgotten timer request error:',
+//         error
+//       );
+
+//       return res.status(500).json({
+//         success: false,
+//         error:
+//           error.message ||
+//           'Failed to reject forgotten timer request.',
+//       });
+//     }
+//   }
+// );
+// // ======================================================
+// // FORGOTTEN TIMER - EMPLOYEE'S OWN REQUESTS
+// // ======================================================
+
+// app.get(
+//   '/api/forgotten-time-requests/:employeeId',
+//   (req, res) => {
+//     try {
+//       const employeeId = String(req.params.employeeId || '').trim();
+
+//       if (!employeeId) {
+//         return res.status(400).json({
+//           success: false,
+//           error: 'employeeId is required.',
+//         });
+//       }
+
+//       const requests = readForgottenTimeRequests()
+//         .filter(
+//           (request) =>
+//             String(request.employeeId) === employeeId
+//         )
+//         .sort(
+//           (a, b) =>
+//             new Date(b.createdAt).getTime() -
+//             new Date(a.createdAt).getTime()
+//         )
+//         .map(publicForgottenTimeRequest);
+
+//       return res.json({
+//         success: true,
+//         requests,
+//       });
+//     } catch (error) {
+//       console.error(
+//         'Get employee forgotten timer requests error:',
+//         error
+//       );
+
+//       return res.status(500).json({
+//         success: false,
+//         error:
+//           error.message ||
+//           'Failed to load forgotten timer requests.',
+//       });
+//     }
+//   }
+// );
+// // app.get('/api/forgotten-time-requests/:employeeId', (req, res) => {
+// //   try {
+// //     const employeeId = String(req.params.employeeId || '').trim();
+
+// //     const requests = readForgottenTimeRequests()
+// //       .filter((request) => String(request.employeeId) === employeeId)
+// //       .sort(
+// //         (a, b) =>
+// //           new Date(b.createdAt).getTime() -
+// //           new Date(a.createdAt).getTime()
+// //       )
+// //       .map(publicForgottenTimeRequest);
+
+// //     return res.json({ success: true, requests });
+// //   } catch (error) {
+// //     return res.status(500).json({
+// //       success: false,
+// //       error: error.message || 'Failed to load requests.',
+// //     });
+// //   }
+// // });
 // // ======================================================
 // // TRACKER TIME SAVE
 // // ======================================================
@@ -2171,57 +2833,45 @@
 // // TRACKER BY DATE
 // // ======================================================
 
+
+
 // app.get(
 //   '/api/tracker-time/:employeeId/:dateKey',
-//   (
-//     req,
-//     res
-//   ) => {
+//   (req, res) => {
 //     try {
-//       const tracker =
-//         readTracker();
+//       const { employeeId, dateKey } = req.params;
+//       const tracker = readTracker();
 
 //       const record =
-//         tracker[
-//           req.params.employeeId
-//         ]?.dates?.[
-//           req.params.dateKey
-//         ];
+//         tracker[employeeId]?.dates?.[dateKey];
+
+//       const liveSeconds = Math.max(
+//         0,
+//         Number(record?.totalSeconds || 0)
+//       );
+
+//       const approvedManualSeconds =
+//         getApprovedManualSeconds(employeeId, dateKey);
+
+//       const totalSeconds =
+//         liveSeconds + approvedManualSeconds;
 
 //       return res.json({
-//         success:
-//           true,
-
-//         employeeId:
-//           req.params.employeeId,
-
-//         dateKey:
-//           req.params.dateKey,
-
-//         totalSeconds:
-//           Number(
-//             record?.totalSeconds ||
-//               0
-//           ),
-
-//         updatedAt:
-//           record?.updatedAt ||
-//           null,
+//         success: true,
+//         employeeId,
+//         dateKey,
+//         totalSeconds,
+//         liveSeconds,
+//         approvedManualSeconds,
+//         updatedAt: record?.updatedAt || null,
 //       });
-//     } catch (
-//       error
-//     ) {
-//       return res
-//         .status(
-//           500
-//         )
-//         .json({
-//           success:
-//             false,
+//     } catch (error) {
+//       console.error('Tracker by date error:', error);
 
-//           error:
-//             error.message,
-//         });
+//       return res.status(500).json({
+//         success: false,
+//         error: error.message,
+//       });
 //     }
 //   }
 // );
@@ -2237,64 +2887,117 @@
 //     res
 //   ) => {
 //     try {
+//       const employeeId =
+//         String(
+//           req.params.employeeId || ''
+//         ).trim();
+
+//       if (!employeeId) {
+//         return res.status(400).json({
+//           success: false,
+//           error: 'employeeId is required.',
+//         });
+//       }
+
 //       const tracker =
 //         readTracker();
 
 //       const employeeData =
-//         tracker[
-//           req.params.employeeId
-//         ];
+//         tracker[employeeId];
 
-//       const records =
-//         Object.entries(
-//           employeeData?.dates ||
-//             {}
-//         )
-//           .map(
-//             ([
-//               dateKey,
-//               value,
-//             ]) => ({
-//               dateKey,
+//       const liveDates =
+//         employeeData?.dates || {};
 
-//               totalSeconds:
-//                 Number(
-//                   value?.totalSeconds ||
-//                     0
-//                 ),
-
-//               updatedAt:
-//                 value?.updatedAt ||
-//                 null,
-//             })
-//           )
-//           .sort(
-//             (
-//               a,
-//               b
-//             ) =>
-//               b.dateKey.localeCompare(
-//                 a.dateKey
-//               )
+//       const approvedRequests =
+//         readForgottenTimeRequests()
+//           .filter(
+//             (request) =>
+//               String(request.employeeId) ===
+//                 employeeId &&
+//               request.status === 'approved'
 //           );
 
-//       const totalSeconds =
+//       const approvedDates =
+//         approvedRequests.map(
+//           (request) =>
+//             String(request.dateKey)
+//         );
+
+//       const allDates =
+//         Array.from(
+//           new Set([
+//             ...Object.keys(liveDates),
+//             ...approvedDates,
+//           ])
+//         ).sort(
+//           (a, b) =>
+//             b.localeCompare(a)
+//         );
+
+//       const records =
+//         allDates.map(
+//           (dateKey) => {
+//             const liveSeconds =
+//               Math.max(
+//                 0,
+//                 Math.floor(
+//                   Number(
+//                     liveDates[dateKey]
+//                       ?.totalSeconds || 0
+//                   )
+//                 )
+//               );
+
+//             const approvedManualSeconds =
+//               getApprovedManualSeconds(
+//                 employeeId,
+//                 dateKey
+//               );
+
+//             const totalSeconds =
+//               liveSeconds +
+//               approvedManualSeconds;
+
+//             return {
+//               dateKey,
+
+//               totalSeconds,
+
+//               liveSeconds,
+
+//               approvedManualSeconds,
+
+//               updatedAt:
+//                 liveDates[dateKey]
+//                   ?.updatedAt || null,
+//             };
+//           }
+//         );
+
+//       const liveTotalSeconds =
 //         records.reduce(
-//           (
-//             total,
-//             record
-//           ) =>
+//           (total, record) =>
 //             total +
-//             record.totalSeconds,
+//             record.liveSeconds,
 //           0
 //         );
 
-//       return res.json({
-//         success:
-//           true,
+//       const approvedManualTotalSeconds =
+//         records.reduce(
+//           (total, record) =>
+//             total +
+//             record.approvedManualSeconds,
+//           0
+//         );
 
-//         employeeId:
-//           req.params.employeeId,
+//       const totalSeconds =
+//         liveTotalSeconds +
+//         approvedManualTotalSeconds;
+
+//       return res.json({
+//         success: true,
+
+//         employeeId,
 
 //         employeeName:
 //           employeeData?.employeeName ||
@@ -2302,26 +3005,27 @@
 
 //         records,
 
+//         liveTotalSeconds,
+
+//         approvedManualTotalSeconds,
+
 //         totalSeconds,
 //       });
-//     } catch (
-//       error
-//     ) {
-//       return res
-//         .status(
-//           500
-//         )
-//         .json({
-//           success:
-//             false,
+//     } catch (error) {
+//       console.error(
+//         'Tracker history error:',
+//         error
+//       );
 
-//           error:
-//             error.message,
-//         });
+//       return res.status(500).json({
+//         success: false,
+//         error:
+//           error.message ||
+//           'Failed to load tracker history.',
+//       });
 //     }
 //   }
 // );
-
 // // ======================================================
 // // MONTH TRACKER
 // // ======================================================
@@ -2358,27 +3062,55 @@
 //             ([
 //               dateKey,
 //               value,
-//             ]) => ({
-//               dateKey,
-
-//               totalSeconds:
+//             ]) => {
+//               const liveSeconds =
 //                 Number(
 //                   value?.totalSeconds ||
 //                     0
-//                 ),
-//             })
-//           );
+//                 );
 
-//       const totalSeconds =
-//         records.reduce(
-//           (
-//             total,
-//             record
-//           ) =>
-//             total +
-//             record.totalSeconds,
-//           0
-//         );
+//               const approvedManualSeconds =
+//                 getApprovedManualSeconds(
+//                   req.params.employeeId,
+//                   dateKey
+//                 );
+
+//               return {
+//                 dateKey,
+
+//                 totalSeconds:
+//                   liveSeconds +
+//                   approvedManualSeconds,
+
+//                 liveSeconds,
+
+//                 approvedManualSeconds,
+//               };
+//             }
+//           );
+// const liveSeconds =
+//   Math.max(
+//     0,
+//     Math.floor(
+//       Number(
+//         tracker[
+//           employee.id
+//         ]?.dates?.[
+//           selectedDate
+//         ]?.totalSeconds || 0
+//       )
+//     )
+//   );
+
+// const approvedManualSeconds =
+//   getApprovedManualSeconds(
+//     employee.id,
+//     selectedDate
+//   );
+
+// const totalSeconds =
+//   liveSeconds +
+//   approvedManualSeconds;
 
 //       return res.json({
 //         success:
@@ -2390,7 +3122,11 @@
 //         monthKey:
 //           req.params.monthKey,
 
-//         totalSeconds,
+// totalSeconds,
+
+// liveSeconds,
+
+// approvedManualSeconds,
 
 //         records,
 //       });
@@ -2777,6 +3513,10 @@
 // // ACTIVITY HISTORY
 // // ======================================================
 
+// // ======================================================
+// // ACTIVITY HISTORY
+// // ======================================================
+
 // app.get(
 //   '/api/activity-history/:employeeId',
 //   (
@@ -2821,11 +3561,15 @@
 //           employee
 //         );
 
+//       // જૂની એક્ટિવિટી ટોટલ્સ (20 મિનિટ પહેલાની ફંક્શનાલિટી)
+//       const activityTotals = getDailyActivityTotals(employee.id);
+
 //       const dates =
 //         Array.from(
 //           new Set([
 //             ...trackerDates,
 //             ...screenshotDates,
+//             ...Object.keys(activityTotals),
 //           ])
 //         )
 //           .sort()
@@ -2835,10 +3579,9 @@
 //         dates.map(
 //           (
 //             dateKey
-//           ) => ({
-//             dateKey,
-
-//             totalSeconds:
+//           ) => {
+//             // લાઈવ ટાઈમ (જે ટાઈમર ચાલુ હોય ત્યારે ગણાય છે)
+//             const liveSeconds =
 //               Number(
 //                 tracker[
 //                   employee.id
@@ -2846,14 +3589,32 @@
 //                   dateKey
 //                 ]?.totalSeconds ||
 //                   0
-//               ),
+//               );
 
-//             screenshotCount:
-//               getScreenshotCount(
-//                 employee,
+//             // એડમિન દ્વારા અપ્રુવ થયેલો ફરગોટન ટાઈમ
+//             const approvedManualSeconds =
+//               getApprovedManualSeconds(
+//                 employee.id,
 //                 dateKey
-//               ),
-//           })
+//               );
+
+//             return {
+//               dateKey,
+
+//               // કુલ સમય = લાઈવ ટાઈમ + અપ્રુવ થયેલો સમય
+//               totalSeconds:
+//                 liveSeconds + approvedManualSeconds,
+
+//               screenshotCount:
+//                 getScreenshotCount(
+//                   employee,
+//                   dateKey
+//                 ),
+                
+//               // જૂની એક્ટિવિટી ટોટલ્સ ઉમેરો
+//               ...(activityTotals[dateKey] || {}),
+//             };
+//           }
 //         );
 
 //       return res.json({
@@ -2949,7 +3710,7 @@
 //               ]?.dates ||
 //               {};
 
-//             const todaySeconds =
+//             const todayLiveSeconds =
 //               Number(
 //                 dates[
 //                   today
@@ -2957,7 +3718,17 @@
 //                   0
 //               );
 
-//             const monthlySeconds =
+//             const todayApprovedManualSeconds =
+//               getApprovedManualSeconds(
+//                 employee.id,
+//                 today
+//               );
+
+//             const todaySeconds =
+//               todayLiveSeconds +
+//               todayApprovedManualSeconds;
+
+//             const monthlyLiveSeconds =
 //               Object.entries(
 //                 dates
 //               )
@@ -2985,6 +3756,37 @@
 //                     ),
 //                   0
 //                 );
+
+//             const monthlyApprovedManualSeconds =
+//               Object.entries(
+//                 dates
+//               )
+//                 .filter(
+//                   ([
+//                     dateKey,
+//                   ]) =>
+//                     dateKey.startsWith(
+//                       month
+//                     )
+//                 )
+//                 .reduce(
+//                   (
+//                     total,
+//                     [
+//                       dateKey,
+//                     ]
+//                   ) =>
+//                     total +
+//                     getApprovedManualSeconds(
+//                       employee.id,
+//                       dateKey
+//                     ),
+//                   0
+//                 );
+
+//             const monthlySeconds =
+//               monthlyLiveSeconds +
+//               monthlyApprovedManualSeconds;
 
 //             return {
 //               employeeId:
@@ -3014,6 +3816,14 @@
 //               todaySeconds,
 
 //               monthlySeconds,
+
+//               todayLiveSeconds,
+
+//               todayApprovedManualSeconds,
+
+//               monthlyLiveSeconds,
+
+//               monthlyApprovedManualSeconds,
 
 //               todayScreenshots:
 //                 getScreenshotCount(
@@ -3058,7 +3868,6 @@
 //     }
 //   }
 // );
-
 // // ======================================================
 // // MULTER SCREENSHOT STORAGE
 // // ======================================================
@@ -3629,6 +4438,179 @@
 // );
 
 // // ======================================================
+// // ACTIVITY COUNT SNAPSHOTS (LOCAL DEVELOPMENT)
+// // Keeps the existing tracking/screenshots behavior intact and adds
+// // per-screenshot mouse/click/key counts for the Admin Dashboard.
+// // ======================================================
+
+// const ACTIVITY_SNAPSHOTS_DB = path.join(UPLOAD_DIR, 'activity-snapshots.json');
+
+// function readActivitySnapshots() {
+//   try {
+//     const parsed = JSON.parse(fs.readFileSync(ACTIVITY_SNAPSHOTS_DB, 'utf8'));
+//     return Array.isArray(parsed) ? parsed : [];
+//   } catch {
+//     return [];
+//   }
+// }
+
+// function writeActivitySnapshots(rows) {
+//   fs.mkdirSync(path.dirname(ACTIVITY_SNAPSHOTS_DB), { recursive: true });
+//   const temporaryPath = `${ACTIVITY_SNAPSHOTS_DB}.tmp`;
+//   fs.writeFileSync(temporaryPath, JSON.stringify(rows, null, 2), 'utf8');
+//   fs.renameSync(temporaryPath, ACTIVITY_SNAPSHOTS_DB);
+// }
+
+// function safeCount(value) {
+//   const number = Number(value);
+//   return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
+// }
+
+// function getDailyActivityTotals(employeeId) {
+//   const result = {};
+//   readActivitySnapshots()
+//     .filter((row) => row.employeeId === employeeId)
+//     .forEach((row) => {
+//       const t = result[row.dateKey] || (result[row.dateKey] = {
+//         activeSeconds: 0, trackedSeconds: 0,
+//         mouseMoves: 0, mouseClicks: 0, keyPresses: 0,
+//       });
+//       t.activeSeconds += safeCount(row.activeSeconds);
+//       t.trackedSeconds += safeCount(row.trackedSeconds);
+//       t.mouseMoves += safeCount(row.mouseMoves);
+//       t.mouseClicks += safeCount(row.mouseClicks);
+//       t.keyPresses += safeCount(row.keyPresses);
+//     });
+//   Object.values(result).forEach((t) => {
+//     t.activityPercent = t.trackedSeconds > 0
+//       ? Math.min(100, Math.round((t.activeSeconds / t.trackedSeconds) * 100))
+//       : null;
+//   });
+//   return result;
+// }
+
+// // app.post('/api/activity-snapshot', (req, res) => {
+// //   try {
+// //     const activityTotals = getDailyActivityTotals(employee.id);
+// //     const employeeId = String(req.body?.employeeId || '').trim();
+// //     const dateKey = String(req.body?.dateKey || '').trim();
+// //     const screenshotKey = safeSegment(req.body?.screenshotKey, '');
+// //     const capturedAt = String(req.body?.capturedAt || new Date().toISOString());
+
+// //     if (!employeeId || !isValidDateKey(dateKey) || !screenshotKey) {
+// //       return res.status(400).json({
+// //         success: false,
+// //         error: 'employeeId, valid dateKey (YYYY-MM-DD), and screenshotKey are required.',
+// //       });
+// //     }
+
+// //     const snapshot = {
+// //       employeeId,
+// //       employeeName: String(req.body?.employeeName || ''),
+// //       dateKey,
+// //       screenshotKey,
+// //       capturedAt,
+// //       mouseMoves: safeCount(req.body?.mouseMoves),
+// //       mouseClicks: safeCount(req.body?.mouseClicks),
+// //       keyPresses: safeCount(req.body?.keyPresses),
+// //       activeSeconds: safeCount(req.body?.activeSeconds),
+// //       trackedSeconds: safeCount(req.body?.trackedSeconds),
+// //     };
+
+// //     const rows = readActivitySnapshots();
+// //     const existingIndex = rows.findIndex((row) =>
+// //       row.employeeId === employeeId &&
+// //       row.dateKey === dateKey &&
+// //       row.screenshotKey === screenshotKey
+// //     );
+
+// //     if (existingIndex >= 0) rows[existingIndex] = snapshot;
+// //     else rows.push(snapshot);
+
+// //     writeActivitySnapshots(rows);
+// //     return res.json({ success: true, snapshot });
+// //   } catch (error) {
+// //     console.error('Activity snapshot save error:', error);
+// //     return res.status(500).json({ success: false, error: error?.message || 'Could not save activity snapshot.' });
+// //   }
+// // });
+// app.post('/api/activity-snapshot', (req, res) => {
+//   try {
+//     const employeeId = String(req.body?.employeeId || '').trim();
+//     const dateKey = String(req.body?.dateKey || '').trim();
+//     const screenshotKey = safeSegment(req.body?.screenshotKey, '');
+//     const capturedAt = String(req.body?.capturedAt || new Date().toISOString());
+
+//     if (!employeeId || !isValidDateKey(dateKey) || !screenshotKey) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'employeeId, valid dateKey (YYYY-MM-DD), and screenshotKey are required.',
+//       });
+//     }
+
+//     const snapshot = {
+//       employeeId,
+//       employeeName: String(req.body?.employeeName || ''),
+//       dateKey,
+//       screenshotKey,
+//       capturedAt,
+//       mouseMoves: safeCount(req.body?.mouseMoves),
+//       mouseClicks: safeCount(req.body?.mouseClicks),
+//       keyPresses: safeCount(req.body?.keyPresses),
+//       activeSeconds: safeCount(req.body?.activeSeconds),
+//       trackedSeconds: safeCount(req.body?.trackedSeconds),
+//     };
+
+//     const rows = readActivitySnapshots();
+//     const existingIndex = rows.findIndex((row) =>
+//       row.employeeId === employeeId &&
+//       row.dateKey === dateKey &&
+//       row.screenshotKey === screenshotKey
+//     );
+
+//     if (existingIndex >= 0) rows[existingIndex] = snapshot;
+//     else rows.push(snapshot);
+
+//     writeActivitySnapshots(rows);
+//     return res.json({ success: true, snapshot });
+//   } catch (error) {
+//     console.error('Activity snapshot save error:', error);
+//     return res.status(500).json({ success: false, error: error?.message || 'Could not save activity snapshot.' });
+//   }
+// });
+
+// app.get('/api/activity-snapshots/:employeeId/:dateKey', (req, res) => {
+//   try {
+//     const { employeeId, dateKey } = req.params;
+//     if (!isValidDateKey(dateKey)) {
+//       return res.status(400).json({ success: false, error: 'Invalid dateKey. Expected YYYY-MM-DD.' });
+//     }
+
+//     const snapshots = readActivitySnapshots()
+//       .filter((row) =>
+//         row.employeeId === employeeId && row.dateKey === dateKey
+//       )
+//       .map((row) => {
+//         const activeSeconds = safeCount(row.activeSeconds);
+//         const trackedSeconds = safeCount(row.trackedSeconds);
+//         return {
+//           ...row,
+//           activeSeconds,
+//           trackedSeconds,
+//           activityPercent: trackedSeconds > 0
+//             ? Math.min(100, Math.round((activeSeconds / trackedSeconds) * 100))
+//             : 0,
+//         };
+//       });
+
+//     return res.json({ success: true, snapshots });
+//   } catch (error) {
+//     console.error('Activity snapshot fetch error:', error);
+//     return res.status(500).json({ success: false, error: error?.message || 'Could not load activity snapshots.' });
+//   }
+// });
+
+// // ======================================================
 // // UNKNOWN API ROUTES
 // // ======================================================
 
@@ -3688,6 +4670,71 @@
 //     }
 //   );
 // }
+
+
+// // ======================================================
+// // SCREENSHOT BATCH UPLOAD (LOCAL DEVELOPMENT)
+// // Client sends metadata JSON followed by matching files[] entries.
+// // ======================================================
+
+// const uploadBatchMemory = multer({
+//   storage: multer.memoryStorage(),
+//   limits: { files: 30, fileSize: 15 * 1024 * 1024 },
+// });
+
+// app.post('/api/upload-screenshot-batch', uploadBatchMemory.array('files', 30), (req, res) => {
+//   try {
+//     let metadata;
+//     try {
+//       metadata = JSON.parse(String(req.body?.metadata || '[]'));
+//     } catch {
+//       return res.status(400).json({ success: false, error: 'Invalid metadata JSON.' });
+//     }
+
+//     if (!Array.isArray(metadata) || !Array.isArray(req.files)) {
+//       return res.status(400).json({ success: false, error: 'metadata and files are required.' });
+//     }
+
+//     const uploadedIds = [];
+//     const failures = [];
+
+//     for (let index = 0; index < req.files.length; index += 1) {
+//       const file = req.files[index];
+//       const item = metadata[index] || {};
+//       const employeeId = String(item.employeeId || '').trim();
+//       const dateKey = String(item.dateKey || '').trim();
+//       const employee = findEmployeeById(employeeId);
+
+//       if (!employee || !isValidDateKey(dateKey)) {
+//         failures.push({ queueId: String(item.queueId || ''), error: !employee ? `Employee not found: ${employeeId}` : 'Invalid dateKey.' });
+//         continue;
+//       }
+
+//       const folder = employeeDateFolder(employee, dateKey);
+//       fs.mkdirSync(folder, { recursive: true });
+//       const originalName = String(item.fileName || file.originalname || `Screen_${Date.now()}.webp`);
+//       const fileName = safeSegment(originalName, `Screen_${Date.now()}.webp`);
+//       fs.writeFileSync(path.join(folder, fileName), file.buffer);
+//       uploadedIds.push(String(item.queueId || ''));
+//     }
+
+//     if (failures.length && uploadedIds.length === 0) {
+//       return res.status(404).json({ success: false, error: 'No screenshots were uploaded.', failures, uploadedIds });
+//     }
+
+//     return res.json({
+//       success: true,
+//       uploadedIds: uploadedIds.filter(Boolean),
+//       uploadedCount: uploadedIds.length,
+//       failedCount: failures.length,
+//       failures,
+//     });
+//   } catch (error) {
+//     console.error('Screenshot batch upload error:', error);
+//     return res.status(500).json({ success: false, error: error?.message || 'Screenshot batch upload failed.' });
+//   }
+// });
+
 
 // // ======================================================
 // // ERROR HANDLER
@@ -3791,7 +4838,6 @@
 //     console.log('');
 //   }
 // );
-
 
 import express from 'express';
 import multer from 'multer';
@@ -8406,68 +9452,6 @@ app.get('/api/activity-snapshots/:employeeId/:dateKey', (req, res) => {
 });
 
 // ======================================================
-// UNKNOWN API ROUTES
-// ======================================================
-
-app.use(
-  '/api',
-  (
-    req,
-    res
-  ) => {
-    return res
-      .status(
-        404
-      )
-      .json({
-        success:
-          false,
-
-        error:
-          `API endpoint not found: ${req.method} ${req.originalUrl}`,
-      });
-  }
-);
-
-// ======================================================
-// FRONTEND - SERVE VITE BUILD
-// ======================================================
-
-const distPath =
-  path.join(
-    __dirname,
-    'dist'
-  );
-
-if (
-  fs.existsSync(
-    distPath
-  )
-) {
-  app.use(
-    express.static(
-      distPath
-    )
-  );
-
-  app.get(
-    /^(?!\/api(?:\/|$)|\/screenshots(?:\/|$)).*/,
-    (
-      req,
-      res
-    ) => {
-      res.sendFile(
-        path.join(
-          distPath,
-          'index.html'
-        )
-      );
-    }
-  );
-}
-
-
-// ======================================================
 // SCREENSHOT BATCH UPLOAD (LOCAL DEVELOPMENT)
 // Client sends metadata JSON followed by matching files[] entries.
 // ======================================================
@@ -8529,6 +9513,68 @@ app.post('/api/upload-screenshot-batch', uploadBatchMemory.array('files', 30), (
     return res.status(500).json({ success: false, error: error?.message || 'Screenshot batch upload failed.' });
   }
 });
+
+
+// ======================================================
+// UNKNOWN API ROUTES
+// ======================================================
+
+app.use(
+  '/api',
+  (
+    req,
+    res
+  ) => {
+    return res
+      .status(
+        404
+      )
+      .json({
+        success:
+          false,
+
+        error:
+          `API endpoint not found: ${req.method} ${req.originalUrl}`,
+      });
+  }
+);
+
+// ======================================================
+// FRONTEND - SERVE VITE BUILD
+// ======================================================
+
+const distPath =
+  path.join(
+    __dirname,
+    'dist'
+  );
+
+if (
+  fs.existsSync(
+    distPath
+  )
+) {
+  app.use(
+    express.static(
+      distPath
+    )
+  );
+
+  app.get(
+    /^(?!\/api(?:\/|$)|\/screenshots(?:\/|$)).*/,
+    (
+      req,
+      res
+    ) => {
+      res.sendFile(
+        path.join(
+          distPath,
+          'index.html'
+        )
+      );
+    }
+  );
+}
 
 
 // ======================================================
