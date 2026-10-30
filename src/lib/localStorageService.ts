@@ -478,7 +478,7 @@ const getBackendUrl = (): string => {
     return configured.replace(/\/$/, '');
   }
 
-  return 'https://codesdot-workmonitor.work-nest.workers.dev';
+  return 'https://nikhil-workmonitor-demo.devwebtester23.workers.dev';
 };
 
 /* ========================================================================== 
