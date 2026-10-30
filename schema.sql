@@ -59,3 +59,42 @@ VALUES (
   1,
   datetime('now')
 );
+
+CREATE TABLE IF NOT EXISTS admins (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  iterations INTEGER NOT NULL DEFAULT 100000,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  last_login_at TEXT
+);
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id TEXT PRIMARY KEY,
+  admin_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  last_used_at TEXT NOT NULL,
+  FOREIGN KEY (admin_id) REFERENCES admins(id)
+);
+ 
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires
+ON admin_sessions(expires_at);
+ 
+CREATE TABLE IF NOT EXISTS screenshot_index (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL,
+  employee_name TEXT,
+  email TEXT,
+  date_key TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  storage_key TEXT NOT NULL UNIQUE,
+  content_type TEXT,
+  uploaded_at TEXT NOT NULL
+);
+ 
+CREATE INDEX IF NOT EXISTS idx_screenshot_employee_date
+ON screenshot_index(employee_id, date_key);
