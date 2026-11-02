@@ -30,7 +30,8 @@
 //     name: row.name,
 //     email: row.email,
 
-
+//     password:
+//       row.password || '',
 
 //     role: row.role,
 //     approved: Boolean(row.approved),
@@ -329,7 +330,8 @@
 //           env.SCREENSHOTS
 //         ),
 
-//       database: 'nikhil-workmonitor-demo-db',
+//       database:
+//         'codesdot-workmonitor-db',
 
 //       serverTime:
 //         new Date()
@@ -3233,6 +3235,11 @@
 //   },
 // };
 
+
+
+
+
+
 function json(data, status = 200) {
   return Response.json(data, {
     status,
@@ -3335,17 +3342,22 @@ const ACTIVITY_SNAPSHOT_TABLE_SQL = `
   )
 `;
 
-// Creates the table and upgrades older tables that predate activity percent.
 async function ensureActivitySnapshotSchema(env) {
   await env.DB.prepare(ACTIVITY_SNAPSHOT_TABLE_SQL).run();
 
-  for (const column of ['active_seconds', 'tracked_seconds']) {
+  const columns = [
+    'active_seconds',
+    'tracked_seconds',
+  ];
+
+  for (const column of columns) {
     try {
       await env.DB.prepare(
         `ALTER TABLE activity_snapshots ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`
       ).run();
     } catch (error) {
       const message = String(error?.message || error).toLowerCase();
+
       if (!message.includes('duplicate column')) {
         throw error;
       }
@@ -5191,15 +5203,16 @@ async function handleApi(
     const mouseClicks = toCount(body.mouseClicks);
     const keyPresses = toCount(body.keyPresses);
     const activeSeconds = toCount(body.activeSeconds);
-    const trackedSeconds = toCount(body.trackedSeconds);
+const trackedSeconds = toCount(body.trackedSeconds);
     const createdAt = new Date().toISOString();
 
+    // await env.DB.prepare(ACTIVITY_SNAPSHOT_TABLE_SQL).run();
     await ensureActivitySnapshotSchema(env);
     await env.DB.prepare(`
       INSERT INTO activity_snapshots (
-        id, employee_id, employee_name, date_key, screenshot_key,
-        captured_at, mouse_moves, mouse_clicks, key_presses,
-        active_seconds, tracked_seconds, created_at
+       id, employee_id, employee_name, date_key, screenshot_key,
+captured_at, mouse_moves, mouse_clicks, key_presses,
+active_seconds, tracked_seconds, created_at
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(employee_id, date_key, screenshot_key)
@@ -5207,14 +5220,13 @@ async function handleApi(
         employee_name = excluded.employee_name,
         captured_at = excluded.captured_at,
         mouse_moves = excluded.mouse_moves,
-        mouse_clicks = excluded.mouse_clicks,
-        key_presses = excluded.key_presses,
-        active_seconds = excluded.active_seconds,
-        tracked_seconds = excluded.tracked_seconds
+mouse_clicks = excluded.mouse_clicks,
+key_presses = excluded.key_presses,
+active_seconds = excluded.active_seconds,
+tracked_seconds = excluded.tracked_seconds
     `).bind(
       crypto.randomUUID(), employeeId, employee.name || 'Employee', dateKey,
-      screenshotKey, capturedAt, mouseMoves, mouseClicks, keyPresses,
-      activeSeconds, trackedSeconds, createdAt
+      screenshotKey, capturedAt, mouseMoves, mouseClicks, keyPresses, activeSeconds, trackedSeconds, createdAt
     ).run();
 
     return json({
@@ -5234,14 +5246,14 @@ async function handleApi(
   if (method === 'GET' && activitySnapshotsMatch) {
     const employeeId = decodeURIComponent(activitySnapshotsMatch[1]);
     const dateKey = activitySnapshotsMatch[2];
+    // await env.DB.prepare(ACTIVITY_SNAPSHOT_TABLE_SQL).run();
     await ensureActivitySnapshotSchema(env);
-
     const result = await env.DB.prepare(`
       SELECT screenshot_key AS screenshotKey, captured_at AS capturedAt,
-             mouse_moves AS mouseMoves, mouse_clicks AS mouseClicks,
-             key_presses AS keyPresses,
-             active_seconds AS activeSeconds,
-             tracked_seconds AS trackedSeconds
+       mouse_moves AS mouseMoves, mouse_clicks AS mouseClicks,
+       key_presses AS keyPresses,
+       active_seconds AS activeSeconds,
+       tracked_seconds AS trackedSeconds
       FROM activity_snapshots
       WHERE employee_id = ? AND date_key = ?
       ORDER BY captured_at DESC
@@ -5251,22 +5263,32 @@ async function handleApi(
       success: true,
       employeeId,
       dateKey,
-      snapshots: (result.results || []).map((row) => {
-        const activeSeconds = Number(row.activeSeconds || 0);
-        const trackedSeconds = Number(row.trackedSeconds || 0);
-        const activityPercent = trackedSeconds > 0
-          ? Math.min(100, Math.round((activeSeconds / trackedSeconds) * 100))
-          : 0;
-        return {
-          ...row,
-          mouseMoves: Number(row.mouseMoves || 0),
-          mouseClicks: Number(row.mouseClicks || 0),
-          keyPresses: Number(row.keyPresses || 0),
-          activeSeconds,
-          trackedSeconds,
-          activityPercent,
-        };
-      }),
+      // snapshots: (result.results || []).map((row) => ({
+      //   ...row,
+      //   mouseMoves: Number(row.mouseMoves || 0),
+      //   mouseClicks: Number(row.mouseClicks || 0),
+      //   keyPresses: Number(row.keyPresses || 0),
+      // })),
+      
+snapshots: (result.results || []).map((row) => {
+  const activeSeconds = Number(row.activeSeconds || 0);
+  const trackedSeconds = Number(row.trackedSeconds || 0);
+
+  const activityPercent = trackedSeconds > 0
+    ? Math.min(100, Math.round((activeSeconds / trackedSeconds) * 100))
+    : 0;
+
+  return {
+    ...row,
+    mouseMoves: Number(row.mouseMoves || 0),
+    mouseClicks: Number(row.mouseClicks || 0),
+    keyPresses: Number(row.keyPresses || 0),
+    activeSeconds,
+    trackedSeconds,
+    activityPercent,
+  };
+}),
+
     });
   }
 
@@ -5426,64 +5448,6 @@ async function handleApi(
         );
     }
 
-        // Activity totals per day, taken from activity_snapshots.
-    try {
-      const activityRows =
-        await env.DB
-          .prepare(`
-            SELECT
-              date_key,
-              COUNT(*) AS snapshot_count,
-              SUM(active_seconds) AS active_seconds,
-              SUM(tracked_seconds) AS tracked_seconds,
-              SUM(mouse_moves) AS mouse_moves,
-              SUM(mouse_clicks) AS mouse_clicks,
-              SUM(key_presses) AS key_presses
-            FROM activity_snapshots
-            WHERE employee_id = ?
-            GROUP BY date_key
-          `)
-          .bind(employeeId)
-          .all();
-
-      for (const row of activityRows.results || []) {
-        const dateKey = row.date_key;
-        if (!isDateKey(dateKey)) {
-          continue;
-        }
-
-        if (!byDate.has(dateKey)) {
-          byDate.set(dateKey, {
-            dateKey,
-            totalSeconds: 0,
-            screenshotCount: 0,
-          });
-        }
-
-        const record = byDate.get(dateKey);
-        const activeSeconds = Number(row.active_seconds || 0);
-        const trackedSeconds = Number(row.tracked_seconds || 0);
-
-        record.activeSeconds = activeSeconds;
-        record.trackedSeconds = trackedSeconds;
-        record.activityPercent =
-          trackedSeconds > 0
-            ? Math.min(100, Math.round((activeSeconds / trackedSeconds) * 100))
-            : null;
-        record.mouseMoves = Number(row.mouse_moves || 0);
-        record.mouseClicks = Number(row.mouse_clicks || 0);
-        record.keyPresses = Number(row.key_presses || 0);
-
-        // Screenshots reach screenshot_index only after the hourly cloud
-        // upload, so use the snapshot count if it is higher.
-        record.screenshotCount = Math.max(
-          Number(record.screenshotCount || 0),
-          Number(row.snapshot_count || 0)
-        );
-      }
-    } catch (activityError) {
-      console.warn('Activity history aggregation failed:', activityError);
-    }
 
     const records =
       Array.from(
@@ -6674,3 +6638,4 @@ export default {
     );
   },
 };
+

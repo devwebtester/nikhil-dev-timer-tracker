@@ -60,6 +60,8 @@ VALUES (
   datetime('now')
 );
 
+
+
 CREATE TABLE IF NOT EXISTS admins (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -71,19 +73,16 @@ CREATE TABLE IF NOT EXISTS admins (
   created_at TEXT NOT NULL,
   last_login_at TEXT
 );
+
 CREATE TABLE IF NOT EXISTS admin_sessions (
   id TEXT PRIMARY KEY,
   admin_id TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
-  last_used_at TEXT NOT NULL,
-  FOREIGN KEY (admin_id) REFERENCES admins(id)
+  last_used_at TEXT NOT NULL
 );
- 
-CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires
-ON admin_sessions(expires_at);
- 
+
 CREATE TABLE IF NOT EXISTS screenshot_index (
   id TEXT PRIMARY KEY,
   employee_id TEXT NOT NULL,
@@ -92,9 +91,9 @@ CREATE TABLE IF NOT EXISTS screenshot_index (
   date_key TEXT NOT NULL,
   file_name TEXT NOT NULL,
   storage_key TEXT NOT NULL UNIQUE,
-  content_type TEXT,
+  content_type TEXT NOT NULL,
   uploaded_at TEXT NOT NULL
 );
- 
+
 CREATE INDEX IF NOT EXISTS idx_screenshot_employee_date
-ON screenshot_index(employee_id, date_key);
+ON screenshot_index (employee_id, date_key);

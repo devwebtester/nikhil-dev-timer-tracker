@@ -109,7 +109,7 @@ const server = http.createServer((req, res) => {
     //   lastMouse = null;
     //   tracking = true; paused = false;
     //   return send(res, 200, { success: true, tracking, paused });
-
+      
     // }
     if (action === 'start') {
       counts = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
@@ -121,7 +121,7 @@ const server = http.createServer((req, res) => {
     }
     // if (action === 'pause') { paused = true; return send(res, 200, { success: true }); }
     // if (action === 'resume') { if (tracking) paused = false; return send(res, 200, { success: true }); }
-
+    
 if (action === 'pause') {
   paused = true;
   lastInputAt = 0;
@@ -139,7 +139,7 @@ if (action === 'resume') {
 }
 
     // if (action === 'stop') { tracking = false; paused = false; lastMouse = null; return send(res, 200, { success: true }); }
-
+    
 if (action === 'stop') {
   tracking = false;
   paused = false;
@@ -155,7 +155,7 @@ if (action === 'stop') {
     //   lastMouse = null;
     //   return send(res, 200, { success: true, counts: snapshot });
     // }
-
+    
 if (action === 'snapshot') {
   const snapshot = {
     ...counts,
