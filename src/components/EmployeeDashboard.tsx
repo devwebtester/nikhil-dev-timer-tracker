@@ -1,3 +1,6 @@
+// import { TimeActivityReport } from './TimeActivityReport';
+// import { PaginationControls, usePagination } from './ScreenshotPagination';
+
 // import React, {
 //   useEffect,
 //   useMemo,
@@ -52,3125 +55,27 @@
 // // BACKEND
 // // ======================================================
 
-// const getBackendUrl = (): string => {
-//   const configured =
-//     import.meta.env.VITE_BACKEND_URL?.trim();
+// // Optional local Windows agent. It counts global input events only while the
+// // employee's tracking session is active; it never records key names or typed text.
+// const GLOBAL_AGENT_URL = 'http://127.0.0.1:3210';
 
-//   if (configured) {
-//     return configured.replace(/\/$/, '');
-//   }
-
-//   return 'https://codesdot-workmonitor.work-nest.workers.dev';
-// };
-
-// // ====================================================
-// // SCREENSHOT CLOUD UPLOAD WINDOW
-// // ====================================================
-
-// const INDIA_TIME_ZONE = 'Asia/Kolkata';
-// const TRACKING_START_MINUTES = 8 * 60 + 30;
-// const TRACKING_END_MINUTES = 20 * 60 + 30;
-
-// const getIndiaMinutes = (date = new Date()) => {
-//   const parts = new Intl.DateTimeFormat('en-IN', {
-//     timeZone: INDIA_TIME_ZONE,
-//     hour: '2-digit',
-//     minute: '2-digit',
-//     hourCycle: 'h23',
-//   }).formatToParts(date);
-//   const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
-//   const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
-//   return hour * 60 + minute;
-// };
-
-// const isScreenshotUploadWindowOpen = (date = new Date()) => {
-//   const minutes = getIndiaMinutes(date);
-//   return minutes >= TRACKING_START_MINUTES && minutes <= TRACKING_END_MINUTES;
-// };
-
-// // ======================================================
-// // SAFE JSON
-// // ======================================================
-
-// const readApiJson = async (
-//   response: Response
-// ) => {
-//   const contentType =
-//     response.headers.get(
-//       'content-type'
-//     ) || '';
-
-//   const raw =
-//     await response.text();
-
-//   if (
-//     !contentType.includes(
-//       'application/json'
-//     )
-//   ) {
-//     console.warn(
-//       'Backend returned non-JSON:',
-//       raw.slice(0, 150)
-//     );
-
-//     throw new Error(
-//       response.status === 429
-//         ? 'Backend is rate-limited (429). Please wait a moment and retry.'
-//         : `Backend returned non-JSON response (${response.status}).`
-//     );
-//   }
-
+// const callGlobalActivityAgent = async (
+//   action: 'start' | 'pause' | 'resume' | 'stop' | 'snapshot'
+// ): Promise<Partial<ScreenshotActivityCounts> | null> => {
 //   try {
-//     return raw
-//       ? JSON.parse(raw)
-//       : {};
+//     const response = await fetch(`${GLOBAL_AGENT_URL}/${action}`, {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({}),
+//       cache: 'no-store',
+//     });
+//     if (!response.ok) return null;
+//     const data = await response.json();
+//     return action === 'snapshot' ? (data?.counts || null) : data;
 //   } catch {
-//     throw new Error(
-//       'Backend returned invalid JSON.'
-//     );
+//     return null;
 //   }
 // };
-
-// // ======================================================
-// // TYPES
-// // ======================================================
-
-// interface ActivityHistoryRecord {
-//   dateKey: string;
-//   totalSeconds: number;
-//   screenshotCount: number;
-// }
-
-// interface EmployeeDashboardProps {
-//   currentUser: AppUser;
-
-//   storageSettings:
-//     StorageSettings;
-
-//   accessToken:
-//     string | null;
-
-//   onConnectDrive:
-//     () => void;
-
-//   onNewScreenshot:
-//     (
-//       log: ScreenshotLog
-//     ) => void;
-
-//   userScreenshots:
-//     ScreenshotLog[];
-
-//   onLogout?:
-//     () => void;
-// }
-
-// // ======================================================
-// // COMPONENT
-// // ======================================================
-
-// export const EmployeeDashboard:
-//   React.FC<
-//     EmployeeDashboardProps
-//   > = ({
-//     currentUser,
-//     storageSettings,
-//     onNewScreenshot,
-//     userScreenshots,
-//     onLogout,
-//   }) => {
-
-//   const backendUrl =
-//     useMemo(
-//       () =>
-//         getBackendUrl(),
-//       []
-//     );
-
-//   const backendHeaders =
-//     useMemo(
-//       () => ({
-//       }),
-//       []
-//     );
-
-//   // ====================================================
-//   // TRACKER
-//   // ====================================================
-
-//   const [
-//     taskName,
-//     setTaskName,
-//   ] =
-//     useState(
-//       'Product Design & Implementation'
-//     );
-
-//   const [
-//     isTracking,
-//     setIsTracking,
-//   ] =
-//     useState(false);
-
-//   const [
-//     isPaused,
-//     setIsPaused,
-//   ] =
-//     useState(false);
-
-//   const [
-//     sessionSeconds,
-//     setSessionSeconds,
-//   ] =
-//     useState(0);
-
-//   const [
-//     dayTotalSeconds,
-//     setDayTotalSeconds,
-//   ] =
-//     useState(0);
-
-//   const [
-//     lastStatus,
-//     setLastStatus,
-//   ] =
-//     useState(
-//       'Ready to start tracking'
-//     );
-
-//   const [
-//     nextCaptureInSec,
-//     setNextCaptureInSec,
-//   ] =
-//     useState<
-//       number | null
-//     >(null);
-
-//   const [
-//     lastCapturedTime,
-//     setLastCapturedTime,
-//   ] =
-//     useState('');
-
-//   // ====================================================
-//   // GLOBAL ADMIN POLICY
-//   // ====================================================
-
-//   const [
-//     captureWindowSeconds,
-//     setCaptureWindowSeconds,
-//   ] =
-//     useState(
-//       Math.max(
-//         5,
-//         Number(
-//           storageSettings
-//             .captureIntervalSeconds ||
-//             600
-//         )
-//       )
-//     );
-
-//   const [
-//     screenshotsPerWindow,
-//     setScreenshotsPerWindow,
-//   ] =
-//     useState(5);
-
-//   const [
-//     capturePresetId,
-//     setCapturePresetId,
-//   ] =
-//     useState('10m-5');
-
-//   const [
-//     centralPolicyUpdatedAt,
-//     setCentralPolicyUpdatedAt,
-//   ] =
-//     useState('');
-
-//   // ====================================================
-//   // HISTORY
-//   // ====================================================
-
-//   const [
-//     selectedDate,
-//     setSelectedDate,
-//   ] =
-//     useState(
-//       getTodayDateKey()
-//     );
-
-//   const [
-//     activityHistory,
-//     setActivityHistory,
-//   ] =
-//     useState<
-//       ActivityHistoryRecord[]
-//     >([]);
-
-//   const [
-//     selectedDateSeconds,
-//     setSelectedDateSeconds,
-//   ] =
-//     useState(0);
-
-//   const [
-//     selectedDateScreenshotCount,
-//     setSelectedDateScreenshotCount,
-//   ] =
-//     useState(0);
-
-//   const [
-//     restoredScreenshots,
-//     setRestoredScreenshots,
-//   ] =
-//     useState<
-//       ScreenshotLog[]
-//     >([]);
-
-//   const [
-//     loadingHistory,
-//     setLoadingHistory,
-//   ] =
-//     useState(false);
-
-//   const [
-//     previewModal,
-//     setPreviewModal,
-//   ] =
-//     useState<
-//       ScreenshotLog | null
-//     >(null);
-
-
-//   // ====================================================
-//   // YEAR / MONTH HISTORY NAVIGATION
-//   // ====================================================
-
-//   const [selectedHistoryYear, setSelectedHistoryYear] =
-//     useState<string>(getTodayDateKey().slice(0, 4));
-
-//   const [selectedHistoryMonth, setSelectedHistoryMonth] =
-//     useState<string>(getTodayDateKey().slice(0, 7));
-
-//   // Blob URLs allow ngrok-protected screenshots to render in <img>.
-//   const [employeeScreenshotUrls, setEmployeeScreenshotUrls] =
-//     useState<Record<string, string>>({});
-
-//   // ====================================================
-//   // SCREEN CAPTURE
-//   // ====================================================
-
-//   const screenVideoRef =
-//     useRef<
-//       HTMLVideoElement | null
-//     >(null);
-
-//   const screenStreamRef =
-//     useRef<
-//       MediaStream | null
-//     >(null);
-
-//   const captureTimerRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   const countdownRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   const trackerTimerRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   // Central D1 tracker sync runs only once per minute while actively tracking.
-//   const trackerSyncIntervalRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   const trackingRef =
-//     useRef(false);
-
-//   const pausedRef =
-//     useRef(false);
-
-//   const daySecondsRef =
-//     useRef(0);
-
-//   // When a tracking session survives a page refresh, keep the saved
-//   // session duration so the next Start action resumes it instead of
-//   // resetting the current task to zero.
-//   const restoredSessionRef =
-//     useRef(false);
-
-//   const captureWindowRef =
-//     useRef(
-//       captureWindowSeconds
-//     );
-
-//   const capturePolicyRefreshAtRef =
-//     useRef(0);
-
-//   const screenshotCountRef =
-//     useRef(
-//       screenshotsPerWindow
-//     );
-
-//   // ====================================================
-//   // KEEP REFS CURRENT
-//   // ====================================================
-
-//   useEffect(() => {
-//     trackingRef.current =
-//       isTracking;
-//   }, [
-//     isTracking,
-//   ]);
-
-//   useEffect(() => {
-//     pausedRef.current =
-//       isPaused;
-//   }, [
-//     isPaused,
-//   ]);
-
-//   useEffect(() => {
-//     daySecondsRef.current =
-//       dayTotalSeconds;
-//   }, [
-//     dayTotalSeconds,
-//   ]);
-
-//   useEffect(() => {
-//     captureWindowRef.current =
-//       captureWindowSeconds;
-//   }, [
-//     captureWindowSeconds,
-//   ]);
-
-//   useEffect(() => {
-//     screenshotCountRef.current =
-//       screenshotsPerWindow;
-//   }, [
-//     screenshotsPerWindow,
-//   ]);
-
-//   // ====================================================
-//   // LOGIN BOOTSTRAP POLICY (NO POLLING)
-//   // ====================================================
-
-//   useEffect(() => {
-//     try {
-//       const raw = localStorage.getItem('workmonitor_employee_capture_settings');
-//       if (!raw) return;
-
-//       const settings = JSON.parse(raw);
-//       const newWindow = Math.max(5, Number(settings?.captureWindowSeconds || settings?.captureIntervalSeconds || 600));
-//       const newCount = Math.max(1, Number(settings?.screenshotsPerWindow || 5));
-//       const newPreset = String(settings?.presetId || '10m-5');
-
-//       setCaptureWindowSeconds(newWindow);
-//       setScreenshotsPerWindow(newCount);
-//       setCapturePresetId(newPreset);
-//       setCentralPolicyUpdatedAt(String(settings?.updatedAt || ''));
-//       captureWindowRef.current = newWindow;
-//       screenshotCountRef.current = newCount;
-//     } catch (error) {
-//       console.warn('Capture policy bootstrap warning:', error);
-//     }
-//   }, []);
-
-//   // ====================================================
-//   // LOCAL TIMER STORAGE
-//   // ====================================================
-
-//   const timerStorageKey =
-//     `wm_emp_timer_` +
-//     `${currentUser.id}_` +
-//     `${getTodayDateKey()}`;
-
-//   // Restore browser timer
-//   useEffect(() => {
-//     try {
-//       const raw =
-//         localStorage.getItem(
-//           timerStorageKey
-//         );
-
-//       if (!raw) {
-//         return;
-//       }
-
-//       const saved =
-//         JSON.parse(raw);
-
-//       if (
-//         typeof saved
-//           ?.dayTotalSeconds ===
-//         'number'
-//       ) {
-//         setDayTotalSeconds(
-//           Math.max(
-//             0,
-//             saved
-//               .dayTotalSeconds
-//           )
-//         );
-//       }
-
-//       if (
-//         typeof saved
-//           ?.sessionSeconds ===
-//         'number'
-//       ) {
-//         const restoredSessionSeconds = Math.max(
-//           0,
-//           saved.sessionSeconds
-//         );
-
-//         setSessionSeconds(
-//           restoredSessionSeconds
-//         );
-
-//         if (
-//           saved?.isTracking &&
-//           restoredSessionSeconds > 0
-//         ) {
-//           restoredSessionRef.current = true;
-//           setLastStatus(
-//             'Previous tracking time restored. Click Start Tracking to continue.'
-//           );
-//         }
-//       }
-
-//       if (
-//         saved?.taskName
-//       ) {
-//         setTaskName(
-//           saved.taskName
-//         );
-//       }
-//     } catch (
-//       error
-//     ) {
-//       console.warn(
-//         'Timer restore warning:',
-//         error
-//       );
-//     }
-//   }, [
-//     timerStorageKey,
-//   ]);
-
-//   // Save timer
-//   useEffect(() => {
-//     try {
-//       localStorage.setItem(
-//         timerStorageKey,
-
-//         JSON.stringify({
-//           dayTotalSeconds,
-//           sessionSeconds,
-//           taskName,
-//           isTracking,
-//           isPaused,
-//           updatedAt:
-//             Date.now(),
-//         })
-//       );
-//     } catch {
-//       // ignore
-//     }
-//   }, [
-//     timerStorageKey,
-//     dayTotalSeconds,
-//     sessionSeconds,
-//     taskName,
-//     isTracking,
-//     isPaused,
-//   ]);
-
-//   // ====================================================
-//   // CENTRAL TRACKER SYNC
-//   // ====================================================
-
-//   const syncTrackerTime =
-//     async (
-//       seconds =
-//         daySecondsRef.current
-//     ) => {
-//       try {
-//         const response =
-//           await fetch(
-//             `${backendUrl}/api/tracker-time`,
-//             {
-//               method:
-//                 'POST',
-
-//               headers: {
-//                 ...backendHeaders,
-//                 'Content-Type':
-//                   'application/json',
-//               },
-
-//               body:
-//                 JSON.stringify({
-//                   employeeId:
-//                     currentUser.id,
-
-//                   employeeName:
-//                     currentUser.name,
-
-//                   dateKey:
-//                     getTodayDateKey(),
-
-//                   totalSeconds:
-//                     Math.max(
-//                       0,
-//                       Math.floor(
-//                         seconds
-//                       )
-//                     ),
-//                 }),
-//             }
-//           );
-
-//         const data =
-//           await readApiJson(
-//             response
-//           );
-
-//         if (
-//           !response.ok ||
-//           !data?.success
-//         ) {
-//           throw new Error(
-//             data?.error ||
-//               'Tracker sync failed'
-//           );
-//         }
-
-//         return Number(
-//           data.totalSeconds ||
-//             seconds
-//         );
-//       } catch (
-//         error
-//       ) {
-//         console.warn(
-//           'Tracker sync warning:',
-//           error
-//         );
-
-//         return seconds;
-//       }
-//     };
-
-//   // ====================================================
-//   // TIMER
-//   // ====================================================
-
-//   useEffect(() => {
-//     if (
-//       isTracking &&
-//       !isPaused
-//     ) {
-//       trackerTimerRef.current =
-//         window.setInterval(
-//           () => {
-//             setSessionSeconds(
-//               (
-//                 previous
-//               ) =>
-//                 previous +
-//                 1
-//             );
-
-//             setDayTotalSeconds(
-//               (
-//                 previous
-//               ) =>
-//                 previous +
-//                 1
-//             );
-//           },
-//           1000
-//         );
-//     } else {
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-
-//         trackerTimerRef.current =
-//           null;
-//       }
-//     }
-
-//     return () => {
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-//       }
-//     };
-//   }, [
-//     isTracking,
-//     isPaused,
-//   ]);
-
-//   // ====================================================
-//   // PERIODIC CENTRAL TRACKER SYNC
-//   // ====================================================
-//   // Keep Cloudflare D1 updated while the employee is working.
-//   // This runs once every 60 seconds only while actively tracking.
-//   // It does not poll while paused or stopped.
-
-//   useEffect(() => {
-//     if (
-//       !isTracking ||
-//       isPaused
-//     ) {
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
-
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
-
-//       return;
-//     }
-
-//     // The Start action already performs the initial sync.
-//     // The interval handles subsequent updates.
-//     trackerSyncIntervalRef.current =
-//       window.setInterval(
-//         () => {
-//           if (
-//             trackingRef.current &&
-//             !pausedRef.current
-//           ) {
-//             void syncTrackerTime(
-//               daySecondsRef.current
-//             );
-//           }
-//         },
-//         60 * 1000
-//       );
-
-//     return () => {
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
-
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
-//     };
-//   }, [
-//     isTracking,
-//     isPaused,
-//   ]);
-
-//   // ====================================================
-//   // SCREEN SHARE
-//   // ====================================================
-
-//   const initScreenStream =
-//     async () => {
-//       try {
-//         if (
-//           !window.isSecureContext ||
-//           !navigator
-//             .mediaDevices ||
-//           typeof navigator
-//             .mediaDevices
-//             .getDisplayMedia !==
-//             'function'
-//         ) {
-//           throw new Error(
-//             'Screen capture requires HTTPS.'
-//           );
-//         }
-
-//         if (
-//           screenStreamRef
-//             .current
-//             ?.active
-//         ) {
-//           return (
-//             screenStreamRef
-//               .current
-//           );
-//         }
-
-//         let stream:
-//           MediaStream;
-
-//         try {
-//           stream =
-//             await navigator
-//               .mediaDevices
-//               .getDisplayMedia({
-//                 video: {
-//                   displaySurface:
-//                     'monitor',
-
-//                   frameRate: {
-//                     ideal:
-//                       5,
-
-//                     max:
-//                       15,
-//                   },
-//                 },
-
-//                 audio:
-//                   false,
-
-//                 monitorTypeSurfaces:
-//                   'include',
-
-//                 selfBrowserSurface:
-//                   'exclude',
-
-//                 surfaceSwitching:
-//                   'exclude',
-
-//                 preferCurrentTab:
-//                   false,
-//               } as any);
-//         } catch {
-//           stream =
-//             await navigator
-//               .mediaDevices
-//               .getDisplayMedia({
-//                 video:
-//                   true,
-
-//                 audio:
-//                   false,
-//               });
-//         }
-
-//         const videoTrack =
-//           stream.getVideoTracks()[
-//             0
-//           ];
-
-//         if (
-//           videoTrack
-//         ) {
-//           videoTrack.onended =
-//             () => {
-//               screenStreamRef.current =
-//                 null;
-
-//               if (
-//                 screenVideoRef.current
-//               ) {
-//                 screenVideoRef.current.srcObject =
-//                   null;
-//               }
-
-//               setLastStatus(
-//                 'Screen sharing stopped. Start tracking again to continue.'
-//               );
-
-//               setIsTracking(
-//                 false
-//               );
-
-//               setIsPaused(
-//                 false
-//               );
-//             };
-//         }
-
-//         screenStreamRef.current =
-//           stream;
-
-//         if (
-//           screenVideoRef.current
-//         ) {
-//           screenVideoRef.current.srcObject =
-//             stream;
-
-//           await screenVideoRef.current
-//             .play()
-//             .catch(
-//               () => {}
-//             );
-//         }
-
-//         return stream;
-//       } catch (
-//         error: any
-//       ) {
-//         console.error(
-//           'Screen permission error:',
-//           error
-//         );
-
-//         setLastStatus(
-//           `Screen capture permission required: ${
-//             error?.message ||
-//             'Cancelled'
-//           }`
-//         );
-
-//         return null;
-//       }
-//     };
-
-//   // ====================================================
-//   // CAPTURE CANVAS
-//   // ====================================================
-
-//   const captureCurrentScreen =
-//     async (
-//       stream:
-//         MediaStream
-//     ) => {
-
-//       let video =
-//         screenVideoRef.current;
-
-//       if (!video) {
-//         return null;
-//       }
-
-//       if (
-//         video.srcObject !==
-//         stream
-//       ) {
-//         video.srcObject =
-//           stream;
-//       }
-
-//       await video
-//         .play()
-//         .catch(
-//           () => {}
-//         );
-
-//       let attempts =
-//         0;
-
-//       while (
-//         (!video.videoWidth ||
-//           !video.videoHeight) &&
-//         attempts <
-//           30
-//       ) {
-//         await new Promise(
-//           (
-//             resolve
-//           ) =>
-//             setTimeout(
-//               resolve,
-//               100
-//             )
-//         );
-
-//         attempts++;
-//       }
-
-//       if (
-//         !video.videoWidth ||
-//         !video.videoHeight
-//       ) {
-//         throw new Error(
-//           'Screen frame is not ready.'
-//         );
-//       }
-
-//       const canvas =
-//         document.createElement(
-//           'canvas'
-//         );
-
-//       canvas.width =
-//         video.videoWidth;
-
-//       canvas.height =
-//         video.videoHeight;
-
-//       const ctx =
-//         canvas.getContext(
-//           '2d',
-//           {
-//             alpha:
-//               false,
-//           }
-//         );
-
-//       if (!ctx) {
-//         throw new Error(
-//           'Canvas unavailable.'
-//         );
-//       }
-
-//       ctx.drawImage(
-//         video,
-//         0,
-//         0,
-//         canvas.width,
-//         canvas.height
-//       );
-
-//       return canvas;
-//     };
-
-//   // ====================================================
-//   // SCREENSHOT UPLOAD
-//   // ====================================================
-
-//   const captureAndUpload =
-//     async () => {
-//       if (
-//         !trackingRef.current ||
-//         pausedRef.current
-//       ) {
-//         return;
-//       }
-
-//       try {
-//         setLastStatus(
-//           'Capturing screenshot...'
-//         );
-
-//         const stream =
-//           await initScreenStream();
-
-//         if (!stream) {
-//           return;
-//         }
-
-//         const canvas =
-//           await captureCurrentScreen(
-//             stream
-//           );
-
-//         if (!canvas) {
-//           return;
-//         }
-
-//         const format =
-//           storageSettings
-//             .screenshotFormat ||
-//           'webp';
-
-//         const {
-//           blob,
-//           mimeType,
-//           extension,
-//         } =
-//           await canvasToBlob(
-//             canvas,
-//             format
-//           );
-
-//         const now =
-//           new Date();
-
-//         const dateKey =
-//           getTodayDateKey(
-//             now
-//           );
-
-//         const timeFormatted =
-//           formatTimeString(
-//             now
-//           );
-
-//         const hourKey =
-//           getHourSlotKey(
-//             now
-//           );
-
-//         const safeTime =
-//           now
-//             .toTimeString()
-//             .split(' ')[0]
-//             .replace(
-//               /:/g,
-//               '-'
-//             );
-
-//         const fileName =
-//           `Screen_${dateKey}_${safeTime}.${extension}`;
-
-//         const result =
-//           await uploadScreenshotLocally(
-//             blob,
-//             fileName,
-//             currentUser.id,
-//             currentUser.name,
-//             dateKey
-//           );
-
-//         const thumbnail =
-//           generateThumbnailDataUrl(
-//             canvas,
-//             640,
-//             360,
-//             0.75
-//           );
-
-//         const fullDataUrl =
-//           canvas.toDataURL(
-//             mimeType,
-//             0.9
-//           );
-
-//         const id =
-//           `scr-${Date.now()}`;
-
-//         setCachedScreenshot(
-//           id,
-//           fullDataUrl
-//         );
-
-//         const log:
-//           ScreenshotLog = {
-//             id,
-
-//             userId:
-//               currentUser.id,
-
-//             userName:
-//               currentUser.name,
-
-//             userEmail:
-//               currentUser.email,
-
-//             taskName,
-
-//             timestamp:
-//               now.toISOString(),
-
-//             timeFormatted,
-
-//             hourKey,
-
-//             dateKey,
-
-//             fileFormat:
-//               format,
-
-//             driveFileId:
-//               result.fileId,
-
-//             driveThumbnailLink:
-//               result.localUrl,
-
-//             previewDataUrl:
-//               thumbnail,
-
-//             productivityScore:
-//               92,
-
-//             productivityLabel:
-//               'High',
-//           };
-
-//         onNewScreenshot(
-//           log
-//         );
-
-//         // Update the visible selected-date count immediately for this local
-//         // capture. The IndexedDB queue is not counted by the Worker until the
-//         // hourly batch upload succeeds.
-//         if (selectedDate === dateKey) {
-//           setSelectedDateScreenshotCount(
-//             (previous) => previous + 1
-//           );
-//         }
-
-//         setLastCapturedTime(
-//           timeFormatted
-//         );
-
-//         setLastStatus(
-//           `✅ Screenshot saved locally and queued for cloud upload. ${
-//             isScreenshotUploadWindowOpen()
-//               ? 'Cloud upload runs in hourly batches.'
-//               : 'Cloud sharing is paused outside 08:30 AM–08:30 PM IST.'
-//           }`
-//         );
-
-//         // Do not reload cloud history after every screenshot.
-//         // The screenshot is already added to the local UI via onNewScreenshot().
-//         // History is fetched only when the user explicitly opens/refreshes it.
-//       } catch (
-//         error: any
-//       ) {
-//         console.error(
-//           'Capture error:',
-//           error
-//         );
-
-//         setLastStatus(
-//           `Capture warning: ${
-//             error?.message ||
-//             'Unknown error'
-//           }`
-//         );
-//       }
-//     };
-
-//   // ====================================================
-//   // RANDOM SCREENSHOT WINDOW
-//   // ====================================================
-
-//   const clearCaptureTimers =
-//     () => {
-//       if (
-//         captureTimerRef.current
-//       ) {
-//         clearTimeout(
-//           captureTimerRef.current
-//         );
-
-//         captureTimerRef.current =
-//           null;
-//       }
-
-//       if (
-//         countdownRef.current
-//       ) {
-//         clearInterval(
-//           countdownRef.current
-//         );
-
-//         countdownRef.current =
-//           null;
-//       }
-//     };
-
-//   const scheduleRandomWindow =
-//     (
-//       windowSeconds =
-//         captureWindowRef.current,
-
-//       screenshotCount =
-//         screenshotCountRef.current
-//     ) => {
-
-//       clearCaptureTimers();
-
-//       if (
-//         !trackingRef.current ||
-//         pausedRef.current
-//       ) {
-//         return;
-//       }
-
-//       const safeWindow =
-//         Math.max(
-//           5,
-//           Math.floor(
-//             Number(
-//               windowSeconds
-//             ) || 600
-//           )
-//         );
-
-//       const safeCount =
-//         Math.max(
-//           1,
-//           Math.floor(
-//             Number(
-//               screenshotCount
-//             ) || 1
-//           )
-//         );
-
-//       const windowMs =
-//         safeWindow *
-//         1000;
-
-//       // Divide full window into random zones.
-//       // This keeps shots random but prevents them
-//       // all coming at exactly the same second.
-//       const randomPositions =
-//         Array.from(
-//           {
-//             length:
-//               safeCount,
-//           },
-
-//           (
-//             _,
-//             index
-//           ) => {
-
-//             const zoneStart =
-//               (
-//                 windowMs *
-//                 index
-//               ) /
-//               safeCount;
-
-//             const zoneEnd =
-//               (
-//                 windowMs *
-//                 (
-//                   index +
-//                   1
-//                 )
-//               ) /
-//               safeCount;
-
-//             const padding =
-//               Math.min(
-//                 500,
-//                 Math.max(
-//                   50,
-//                   (
-//                     zoneEnd -
-//                     zoneStart
-//                   ) *
-//                     0.05
-//                 )
-//               );
-
-//             const start =
-//               zoneStart +
-//               padding;
-
-//             const end =
-//               Math.max(
-//                 start +
-//                   25,
-//                 zoneEnd -
-//                   padding
-//               );
-
-//             return Math.floor(
-//               start +
-//                 Math.random() *
-//                   (
-//                     end -
-//                     start
-//                   )
-//             );
-//           }
-//         ).sort(
-//           (
-//             a,
-//             b
-//           ) =>
-//             a - b
-//         );
-
-//       let index =
-//         0;
-
-//       let elapsedPosition =
-//         0;
-
-//       const scheduleNext =
-//         () => {
-
-//           if (
-//             !trackingRef.current ||
-//             pausedRef.current
-//           ) {
-//             clearCaptureTimers();
-//             return;
-//           }
-
-//           // All screenshots done.
-//           // Wait until current window finishes,
-//           // then generate a fresh random window.
-//           if (
-//             index >=
-//             randomPositions.length
-//           ) {
-//             const remaining =
-//               Math.max(
-//                 100,
-//                 windowMs -
-//                   elapsedPosition
-//               );
-
-//             setNextCaptureInSec(
-//               Math.ceil(
-//                 remaining /
-//                   1000
-//               )
-//             );
-
-//             countdownRef.current =
-//               window.setInterval(
-//                 () => {
-//                   setNextCaptureInSec(
-//                     (
-//                       previous
-//                     ) =>
-//                       previous ===
-//                         null ||
-//                       previous <=
-//                         1
-//                         ? 0
-//                         : previous -
-//                           1
-//                   );
-//                 },
-//                 1000
-//               );
-
-//             captureTimerRef.current =
-//               window.setTimeout(
-//                 () => {
-//                   clearCaptureTimers();
-
-//                   scheduleRandomWindow(
-//                     safeWindow,
-//                     safeCount
-//                   );
-//                 },
-//                 remaining
-//               );
-
-//             return;
-//           }
-
-//           const position =
-//             randomPositions[
-//               index
-//             ];
-
-//           const delay =
-//             Math.max(
-//               50,
-//               position -
-//                 elapsedPosition
-//             );
-
-//           setNextCaptureInSec(
-//             Math.max(
-//               1,
-//               Math.ceil(
-//                 delay /
-//                   1000
-//               )
-//             )
-//           );
-
-//           countdownRef.current =
-//             window.setInterval(
-//               () => {
-//                 setNextCaptureInSec(
-//                   (
-//                     previous
-//                   ) =>
-//                     previous ===
-//                       null ||
-//                     previous <=
-//                       1
-//                       ? 0
-//                       : previous -
-//                         1
-//                 );
-//               },
-//               1000
-//             );
-
-//           captureTimerRef.current =
-//             window.setTimeout(
-//               async () => {
-
-//                 if (
-//                   countdownRef.current
-//                 ) {
-//                   clearInterval(
-//                     countdownRef.current
-//                   );
-
-//                   countdownRef.current =
-//                     null;
-//                 }
-
-//                 await captureAndUpload();
-
-//                 elapsedPosition =
-//                   position;
-
-//                 index++;
-
-//                 scheduleNext();
-//               },
-//               delay
-//             );
-//         };
-
-//       scheduleNext();
-//     };
-
-//   // ====================================================
-//   // CAPTURE POLICY REFRESH (FOCUS/VISIBILITY ONLY)
-//   // ====================================================
-//   // Admin changes are picked up when the employee returns to the tab.
-//   // There is deliberately no interval polling.
-//   const refreshCapturePolicy = async () => {
-//     const now = Date.now();
-
-//     // Focus + visibilitychange can fire together. Avoid duplicate
-//     // requests while still picking up admin changes quickly.
-//     if (
-//       now -
-//         capturePolicyRefreshAtRef.current <
-//       30000
-//     ) {
-//       return;
-//     }
-
-//     capturePolicyRefreshAtRef.current = now;
-
-//     try {
-//       const response = await fetch(
-//         `${backendUrl}/api/capture-settings`,
-//         {
-//           cache: 'no-store',
-//           headers: backendHeaders,
-//         }
-//       );
-
-//       const data = await readApiJson(response);
-
-//       if (
-//         !response.ok ||
-//         !data?.success ||
-//         !data?.settings
-//       ) {
-//         return;
-//       }
-
-//       const settings = data.settings;
-//       const newWindow = Math.max(
-//         5,
-//         Number(
-//           settings.captureWindowSeconds ||
-//           settings.captureIntervalSeconds ||
-//           600
-//         )
-//       );
-//       const newCount = Math.max(
-//         1,
-//         Number(settings.screenshotsPerWindow || 5)
-//       );
-//       const newPreset = String(
-//         settings.presetId || 'custom'
-//       );
-//       const newUpdatedAt = String(
-//         settings.updatedAt || ''
-//       );
-
-//       const changed =
-//         newWindow !== captureWindowRef.current ||
-//         newCount !== screenshotCountRef.current ||
-//         newPreset !== capturePresetId ||
-//         newUpdatedAt !== centralPolicyUpdatedAt;
-
-//       setCaptureWindowSeconds(newWindow);
-//       setScreenshotsPerWindow(newCount);
-//       setCapturePresetId(newPreset);
-//       setCentralPolicyUpdatedAt(newUpdatedAt);
-
-//       captureWindowRef.current = newWindow;
-//       screenshotCountRef.current = newCount;
-
-//       if (
-//         changed &&
-//         trackingRef.current &&
-//         !pausedRef.current
-//       ) {
-//         scheduleRandomWindow(
-//           newWindow,
-//           newCount
-//         );
-//       }
-
-//       try {
-//         localStorage.setItem(
-//           'workmonitor_employee_capture_settings',
-//           JSON.stringify(settings)
-//         );
-//       } catch {
-//         // ignore local cache errors
-//       }
-//     } catch (error) {
-//       console.warn(
-//         'Capture policy refresh warning:',
-//         error
-//       );
-//     }
-//   };
-
-//   useEffect(() => {
-//     const handleVisibilityOrFocus = () => {
-//       if (
-//         document.visibilityState === 'visible'
-//       ) {
-//         void refreshCapturePolicy();
-//       }
-//     };
-
-//     window.addEventListener(
-//       'focus',
-//       handleVisibilityOrFocus
-//     );
-//     document.addEventListener(
-//       'visibilitychange',
-//       handleVisibilityOrFocus
-//     );
-
-//     return () => {
-//       window.removeEventListener(
-//         'focus',
-//         handleVisibilityOrFocus
-//       );
-//       document.removeEventListener(
-//         'visibilitychange',
-//         handleVisibilityOrFocus
-//       );
-//     };
-//   }, [backendUrl, capturePresetId, centralPolicyUpdatedAt]);
-
-//   // ====================================================
-//   // HOURLY CLOUD UPLOAD QUEUE
-//   // ====================================================
-
-//   useEffect(() => {
-//     const stopScheduler = startScreenshotUploadScheduler();
-//     return stopScheduler;
-//   }, []);
-
-//   // ====================================================
-//   // GLOBAL POLICY
-//   // ====================================================
-//   // Capture policy is supplied by employee login and cached locally.
-//   // No background /api/capture-settings polling is performed.
-
-//   // ====================================================
-//   // HISTORY
-//   // ====================================================
-
-//   const loadDateHistory =
-//     async () => {
-//       setLoadingHistory(
-//         true
-//       );
-//       // Reset the selected-date count before loading a different date so an
-//       // older date's screenshot count is not carried into the new selection.
-//       setSelectedDateScreenshotCount(0);
-
-//       try {
-//         const [
-//           historyResponse,
-//           activityResponse,
-//         ] =
-//           await Promise.all([
-//             fetch(
-//               `${backendUrl}/api/activity-history/${encodeURIComponent(
-//                 currentUser.id
-//               )}`,
-//               {
-//                 cache:
-//                   'no-store',
-//                 headers:
-//                   backendHeaders,
-//               }
-//             ),
-
-//             fetch(
-//               `${backendUrl}/api/activity/${encodeURIComponent(
-//                 currentUser.id
-//               )}/${encodeURIComponent(
-//                 selectedDate
-//               )}`,
-//               {
-//                 cache:
-//                   'no-store',
-//                 headers:
-//                   backendHeaders,
-//               }
-//             ),
-//           ]);
-
-//         const historyData =
-//           await readApiJson(
-//             historyResponse
-//           );
-
-//         const activityData =
-//           await readApiJson(
-//             activityResponse
-//           );
-
-//         if (
-//           historyResponse.ok &&
-//           historyData
-//             ?.success
-//         ) {
-//           setActivityHistory(
-//             Array.isArray(
-//               historyData.records
-//             )
-//               ? historyData.records
-//               : []
-//           );
-//         }
-
-//         if (
-//           activityResponse.ok &&
-//           activityData
-//             ?.success
-//         ) {
-//           setSelectedDateSeconds(
-//             Math.max(
-//               0,
-//               Number(
-//                 activityData
-//                   .totalSeconds ||
-//                   0
-//               )
-//             )
-//           );
-
-//           setSelectedDateScreenshotCount(
-//             Math.max(
-//               0,
-//               Number(
-//                 activityData
-//                   .screenshotCount ||
-//                   0
-//               )
-//             )
-//           );
-//         } else {
-//           setSelectedDateSeconds(
-//             0
-//           );
-
-//           setSelectedDateScreenshotCount(
-//             0
-//           );
-//         }
-
-//         // Central files
-//         const files =
-//           await getLocalScreenshots(
-//             currentUser.id,
-//             selectedDate
-//           );
-
-//         const restored:
-//           ScreenshotLog[] =
-//           files.map(
-//             (
-//               item,
-//               index
-//             ) => {
-
-//               const fileName =
-//                 item.fileName;
-
-//               const url =
-//                 item.localUrl;
-
-//               const match =
-//                 fileName.match(
-//                   /Screen_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})\.(webp|png|jpg|jpeg)$/i
-//                 );
-
-//               let timestamp =
-//                 `${selectedDate}T00:00:00`;
-
-//               let timeFormatted =
-//                 '';
-
-//               let hourKey =
-//                 '';
-
-//               if (match) {
-//                 const [
-//                   ,
-//                   date,
-//                   hh,
-//                   mm,
-//                   ss,
-//                 ] =
-//                   match;
-
-//                 const dateObject =
-//                   new Date(
-//                     `${date}T${hh}:${mm}:${ss}`
-//                   );
-
-//                 timestamp =
-//                   dateObject.toISOString();
-
-//                 timeFormatted =
-//                   formatTimeString(
-//                     dateObject
-//                   );
-
-//                 hourKey =
-//                   getHourSlotKey(
-//                     dateObject
-//                   );
-//               }
-
-//               const extension =
-//                 fileName
-//                   .toLowerCase()
-//                   .endsWith(
-//                     '.png'
-//                   )
-//                   ? 'png'
-//                   : fileName
-//                       .toLowerCase()
-//                       .match(
-//                         /\.jpe?g$/
-//                       )
-//                     ? 'jpg'
-//                     : 'webp';
-
-//               return {
-//                 id:
-//                   `saved-${selectedDate}-${fileName}-${index}`,
-
-//                 userId:
-//                   currentUser.id,
-
-//                 userName:
-//                   currentUser.name,
-
-//                 userEmail:
-//                   currentUser.email,
-
-//                 taskName:
-//                   'Saved Screenshot',
-
-//                 timestamp,
-
-//                 timeFormatted,
-
-//                 hourKey,
-
-//                 dateKey:
-//                   selectedDate,
-
-//                 fileFormat:
-//                   extension,
-
-//                 driveFileId:
-//                   fileName,
-
-//                 driveThumbnailLink:
-//                   url,
-
-//                 previewDataUrl:
-//                   url,
-//               };
-//             }
-//           );
-
-//         restored.sort(
-//           (
-//             a,
-//             b
-//           ) =>
-//             new Date(
-//               b.timestamp
-//             ).getTime() -
-//             new Date(
-//               a.timestamp
-//             ).getTime()
-//         );
-
-//         setRestoredScreenshots(
-//           restored
-//         );
-
-//         // The API count includes centrally uploaded screenshots only. Also
-//         // count locally queued screenshots so the employee sees captures
-//         // before their next hourly upload.
-//         setSelectedDateScreenshotCount(
-//           (currentCount) => Math.max(currentCount, restored.length)
-//         );
-//       } catch (
-//         error
-//       ) {
-//         console.warn(
-//           'History warning:',
-//           error
-//         );
-//       } finally {
-//         setLoadingHistory(
-//           false
-//         );
-//       }
-//     };
-
-//   // Load history when the dashboard opens and when the employee selects a
-//   // different date. This is event-driven, not polling, so it avoids repeated
-//   // Worker requests while keeping the selected date's history accurate.
-//   useEffect(() => {
-//     void loadDateHistory();
-//     // loadDateHistory is intentionally omitted because it is recreated on
-//     // render; the stable triggers are the user ID and selected date.
-//     // eslint-disable-next-line react-hooks/exhaustive-deps
-//   }, [currentUser.id, selectedDate]);
-
-//   // ====================================================
-//   // MERGE SCREENSHOTS
-//   // ====================================================
-
-//   const mergedScreenshots =
-//     useMemo(() => {
-
-//       const map =
-//         new Map<
-//           string,
-//           ScreenshotLog
-//         >();
-
-//       restoredScreenshots.forEach(
-//         (
-//           screenshot
-//         ) => {
-
-//           const key =
-//             screenshot
-//               .driveThumbnailLink ||
-//             screenshot
-//               .driveFileId ||
-//             screenshot.id;
-
-//           map.set(
-//             key,
-//             screenshot
-//           );
-//         }
-//       );
-
-//       userScreenshots.forEach(
-//         (
-//           screenshot
-//         ) => {
-
-//           if (
-//             screenshot.dateKey !==
-//             selectedDate
-//           ) {
-//             return;
-//           }
-
-//           const key =
-//             screenshot
-//               .driveThumbnailLink ||
-//             screenshot
-//               .driveFileId ||
-//             screenshot.id;
-
-//           map.set(
-//             key,
-//             screenshot
-//           );
-//         }
-//       );
-
-//       return Array.from(
-//         map.values()
-//       ).sort(
-//         (
-//           a,
-//           b
-//         ) =>
-//           new Date(
-//             b.timestamp
-//           ).getTime() -
-//           new Date(
-//             a.timestamp
-//           ).getTime()
-//       );
-//     }, [
-//       restoredScreenshots,
-//       userScreenshots,
-//       selectedDate,
-//     ]);
-
-//   // ====================================================
-//   // YEAR / MONTH HISTORY GROUPS
-//   // ====================================================
-
-//   const historyYears = useMemo(() => {
-//     return Array.from(
-//       new Set(
-//         activityHistory
-//           .map((record) => record.dateKey.slice(0, 4))
-//           .filter(Boolean)
-//       )
-//     ).sort((a, b) => b.localeCompare(a));
-//   }, [activityHistory]);
-
-//   const historyMonths = useMemo(() => {
-//     return Array.from(
-//       new Set(
-//         activityHistory
-//           .filter((record) => record.dateKey.startsWith(`${selectedHistoryYear}-`))
-//           .map((record) => record.dateKey.slice(0, 7))
-//       )
-//     ).sort((a, b) => b.localeCompare(a));
-//   }, [activityHistory, selectedHistoryYear]);
-
-//   const filteredHistoryDates = useMemo(() => {
-//     return activityHistory
-//       .filter((record) => record.dateKey.startsWith(`${selectedHistoryMonth}-`))
-//       .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-//   }, [activityHistory, selectedHistoryMonth]);
-
-//   useEffect(() => {
-//     if (!activityHistory.length) return;
-
-//     const preferredYear =
-//       historyYears.includes(selectedDate.slice(0, 4))
-//         ? selectedDate.slice(0, 4)
-//         : historyYears[0];
-
-//     if (preferredYear && preferredYear !== selectedHistoryYear) {
-//       setSelectedHistoryYear(preferredYear);
-//     }
-//   }, [activityHistory, historyYears, selectedDate, selectedHistoryYear]);
-
-//   useEffect(() => {
-//     if (!historyMonths.length) return;
-
-//     const dateMonth = selectedDate.slice(0, 7);
-//     const preferredMonth =
-//       historyMonths.includes(dateMonth)
-//         ? dateMonth
-//         : historyMonths[0];
-
-//     if (preferredMonth && preferredMonth !== selectedHistoryMonth) {
-//       setSelectedHistoryMonth(preferredMonth);
-//     }
-//   }, [historyMonths, selectedDate, selectedHistoryMonth]);
-
-//   const monthLabel = (monthKey: string) => {
-//     const [year, month] = monthKey.split('-').map(Number);
-//     return new Date(year, Math.max(0, month - 1), 1).toLocaleString(
-//       undefined,
-//       { month: 'long' }
-//     );
-//   };
-
-//   // ====================================================
-//   // EMPLOYEE SCREENSHOT IMAGE LOADING
-//   // ====================================================
-//   // Only fetch a screenshot image once per source URL.
-//   // Previously this effect refetched EVERY existing screenshot whenever
-//   // mergedScreenshots changed. Because a new screenshot changed that array,
-//   // one new screenshot could trigger hundreds of old image requests again.
-//   const employeeScreenshotUrlCacheRef =
-//     useRef<Record<string, string>>({});
-
-//   useEffect(() => {
-//     let cancelled = false;
-
-//     const loadImages = async () => {
-//       const loaded: Record<string, string> = {};
-//       const cache = employeeScreenshotUrlCacheRef.current;
-
-//       for (const screenshot of mergedScreenshots) {
-//         const source =
-//           screenshot.driveThumbnailLink ||
-//           screenshot.previewDataUrl ||
-//           '';
-
-//         if (!source || cancelled) continue;
-
-//         // Fresh in-browser captures are already data/blob URLs.
-//         if (source.startsWith('data:') || source.startsWith('blob:')) {
-//           loaded[source] = source;
-//           continue;
-//         }
-
-//         // Reuse an already-loaded cloud image instead of fetching it again.
-//         const cachedUrl = cache[source];
-//         if (cachedUrl) {
-//           loaded[source] = cachedUrl;
-//           continue;
-//         }
-
-//         try {
-//           const response = await fetch(source, {
-//             method: 'GET',
-//             cache: 'force-cache',
-//             headers: {
-//             },
-//           });
-
-//           if (!response.ok) {
-//             throw new Error(`HTTP ${response.status}`);
-//           }
-
-//           const blob = await response.blob();
-//           if (cancelled) return;
-
-//           const objectUrl = URL.createObjectURL(blob);
-//           cache[source] = objectUrl;
-//           loaded[source] = objectUrl;
-//         } catch (error) {
-//           // Keep a direct image URL as a fallback. Cross-origin <img> can
-//           // display images even when fetch() -> Blob is blocked by CORS.
-//           // This avoids a blank Employee Screenshot History when Admin can
-//           // already see the same uploaded screenshot.
-//           console.warn(
-//             'Employee screenshot fetch failed; using direct image URL:',
-//             screenshot.driveFileId,
-//             error
-//           );
-//           loaded[source] = source;
-//         }
-//       }
-
-//       if (!cancelled) {
-//         setEmployeeScreenshotUrls(loaded);
-//       }
-//     };
-
-//     void loadImages();
-
-//     return () => {
-//       cancelled = true;
-//     };
-//   }, [mergedScreenshots]);
-
-//   // ====================================================
-//   // START
-//   // ====================================================
-
-//   const startTracking =
-//     async () => {
-
-//       const stream =
-//         await initScreenStream();
-
-//       if (!stream) {
-//         return;
-//       }
-
-//       trackingRef.current =
-//         true;
-
-//       pausedRef.current =
-//         false;
-
-//       setIsTracking(
-//         true
-//       );
-
-//       setIsPaused(
-//         false
-//       );
-
-//       if (restoredSessionRef.current) {
-//         restoredSessionRef.current = false;
-//       } else {
-//         setSessionSeconds(0);
-//       }
-
-//       setLastStatus(
-//         '✅ Tracking started'
-//       );
-
-//       await syncTrackerTime();
-
-//       scheduleRandomWindow(
-//         captureWindowRef.current,
-//         screenshotCountRef.current
-//       );
-//     };
-
-//   // ====================================================
-//   // PAUSE
-//   // ====================================================
-
-//   const pauseTracking =
-//     async () => {
-
-//       pausedRef.current =
-//         true;
-
-//       setIsPaused(
-//         true
-//       );
-
-//       clearCaptureTimers();
-
-//       setNextCaptureInSec(
-//         null
-//       );
-
-//       await syncTrackerTime();
-
-//       setLastStatus(
-//         'Tracking paused'
-//       );
-//     };
-
-//   // ====================================================
-//   // RESUME
-//   // ====================================================
-
-//   const resumeTracking =
-//     () => {
-
-//       pausedRef.current =
-//         false;
-
-//       setIsPaused(
-//         false
-//       );
-
-//       scheduleRandomWindow(
-//         captureWindowRef.current,
-//         screenshotCountRef.current
-//       );
-
-//       setLastStatus(
-//         'Tracking resumed'
-//       );
-//     };
-
-//   // ====================================================
-//   // STOP
-//   // ====================================================
-
-//   const stopTracking =
-//     async () => {
-
-//       await syncTrackerTime();
-
-//       trackingRef.current =
-//         false;
-
-//       pausedRef.current =
-//         false;
-
-//       setIsTracking(
-//         false
-//       );
-
-//       setIsPaused(
-//         false
-//       );
-
-//       clearCaptureTimers();
-
-//       setNextCaptureInSec(
-//         null
-//       );
-
-//       if (
-//         screenStreamRef.current
-//       ) {
-//         screenStreamRef.current
-//           .getTracks()
-//           .forEach(
-//             (
-//               track
-//             ) =>
-//               track.stop()
-//           );
-
-//         screenStreamRef.current =
-//           null;
-//       }
-
-//       if (
-//         screenVideoRef.current
-//       ) {
-//         screenVideoRef.current.srcObject =
-//           null;
-//       }
-
-//       setSessionSeconds(
-//         0
-//       );
-
-//       restoredSessionRef.current = false;
-
-//       setLastStatus(
-//         `Tracking stopped. Today: ${formatSecondsToHoursMinutes(
-//           daySecondsRef.current
-//         )}`
-//       );
-
-//       await loadDateHistory();
-//     };
-
-//   // ====================================================
-//   // CLEANUP
-//   // ====================================================
-
-//   useEffect(() => {
-//     return () => {
-
-//       clearCaptureTimers();
-
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-//       }
-
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
-
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
-
-//       if (
-//         screenStreamRef.current
-//       ) {
-//         screenStreamRef.current
-//           .getTracks()
-//           .forEach(
-//             (
-//               track
-//             ) =>
-//               track.stop()
-//           );
-//       }
-//     };
-//   }, []);
-
-//   // ====================================================
-//   // UI HELPERS
-//   // ====================================================
-
-//   const policyText =
-//     `${screenshotsPerWindow} screenshot${
-//       screenshotsPerWindow ===
-//       1
-//         ? ''
-//         : 's'
-//     } randomly / ${
-//       captureWindowSeconds <
-//       60
-//         ? `${captureWindowSeconds} sec`
-//         : `${Math.round(
-//             captureWindowSeconds /
-//               60
-//           )} min`
-//     }`;
-
-//   const today =
-//     getTodayDateKey();
-
-//   // ====================================================
-//   // RENDER
-//   // ====================================================
-
-//   return (
-//     <div className="w-full max-w-7xl mx-auto space-y-6">
-
-//       {/* HEADER */}
-
-//       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-
-//         <div className="flex items-center gap-3">
-
-//           <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
-//             <Monitor className="w-6 h-6" />
-//           </div>
-
-//           <div>
-
-//             <h1 className="text-2xl font-bold">
-//               Employee Dashboard
-//             </h1>
-
-//             <div className="text-sm text-slate-500">
-//               {currentUser.name}
-//               {' • '}
-//               {currentUser.email}
-//             </div>
-
-//           </div>
-
-//         </div>
-
-//         {onLogout && (
-//           <button
-//             type="button"
-//             onClick={
-//               onLogout
-//             }
-//             className="cursor-pointer px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
-//           >
-//             Logout
-//           </button>
-//         )}
-
-//       </div>
-
-//       {/* TRACKING CARD */}
-
-//       <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/20 p-6 space-y-5">
-
-//         <div>
-
-//           <label className="text-xs uppercase font-bold text-slate-500">
-//             Currently Working On
-//           </label>
-
-//           <input
-//             type="text"
-//             value={
-//               taskName
-//             }
-//             onChange={(
-//               event
-//             ) =>
-//               setTaskName(
-//                 event.target
-//                   .value
-//               )
-//             }
-//             className="mt-2 w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-//           />
-
-//         </div>
-
-//         {/* POLICY */}
-
-//         <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-
-//           <div className="flex flex-wrap items-center gap-2">
-
-//             <Camera className="w-4 h-4 text-indigo-600" />
-
-//             <span className="text-xs font-bold">
-//               Live Admin Capture Policy:
-//             </span>
-
-//             <span className="text-sm font-black text-indigo-600">
-//               {policyText}
-//             </span>
-
-//             <span className="px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-//               AUTO SYNC
-//             </span>
-
-//           </div>
-
-//           <div className="mt-2 text-[11px] text-slate-500">
-
-//             {capturePresetId ===
-//             'custom'
-//               ? 'Custom policy selected by Admin.'
-//               : 'Preset policy selected by Admin.'}
-
-//             {centralPolicyUpdatedAt
-//               ? ` Last updated: ${new Date(
-//                   centralPolicyUpdatedAt
-//                 ).toLocaleTimeString()}`
-//               : ''}
-
-//           </div>
-
-//         </div>
-
-//         {/* BUTTONS */}
-
-//         <div className="flex flex-col sm:flex-row gap-3">
-
-//           {!isTracking ? (
-//             <button
-//               type="button"
-//               onClick={
-//                 startTracking
-//               }
-//               className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-//             >
-//               <Play className="w-4 h-4" />
-
-//               Start Tracking
-//             </button>
-//           ) : (
-//             <>
-//               {!isPaused ? (
-//                 <button
-//                   type="button"
-//                   onClick={
-//                     pauseTracking
-//                   }
-//                   className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold"
-//                 >
-//                   <Pause className="w-4 h-4" />
-
-//                   Pause
-//                 </button>
-//               ) : (
-//                 <button
-//                   type="button"
-//                   onClick={
-//                     resumeTracking
-//                   }
-//                   className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
-//                 >
-//                   <Play className="w-4 h-4" />
-
-//                   Resume
-//                 </button>
-//               )}
-
-//               <button
-//                 type="button"
-//                 onClick={
-//                   stopTracking
-//                 }
-//                 className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
-//               >
-//                 <Square className="w-4 h-4" />
-
-//                 Stop
-//               </button>
-//             </>
-//           )}
-
-//         </div>
-
-//         {/* CAPTURE COUNTDOWN */}
-
-//         {isTracking &&
-//           !isPaused &&
-//           nextCaptureInSec !==
-//             null && (
-//           <div className="text-xs text-center font-semibold text-slate-600 dark:text-slate-300">
-
-//             Next random screenshot in approximately{' '}
-
-//             <span className="font-mono text-indigo-600">
-//               {nextCaptureInSec}s
-//             </span>
-
-//           </div>
-//         )}
-
-//       </div>
-
-//       {/* SUMMARY */}
-
-//       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-//           <div className="text-[11px] uppercase font-bold text-slate-500">
-//             Current Task Duration
-//           </div>
-
-//           <div className="text-2xl font-black mt-2">
-//             {formatSecondsToHoursMinutes(
-//               sessionSeconds
-//             )}
-//           </div>
-
-//         </div>
-
-//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-//           <div className="text-[11px] uppercase font-bold text-slate-500">
-//             Today Total Tracked
-//           </div>
-
-//           <div className="text-2xl font-black mt-2 text-emerald-600">
-//             {formatSecondsToHoursMinutes(
-//               dayTotalSeconds
-//             )}
-//           </div>
-
-//         </div>
-
-//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-//           <div className="text-[11px] uppercase font-bold text-slate-500">
-//             Selected Date Screenshots
-//           </div>
-
-//           <div className="text-2xl font-black mt-2 text-indigo-600">
-//             {selectedDateScreenshotCount}
-//           </div>
-
-//         </div>
-
-//       </div>
-
-//       {/* STATUS */}
-
-//       <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 flex items-start gap-2">
-
-//         {lastStatus.startsWith(
-//           '✅'
-//         ) ? (
-//           <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />
-//         ) : (
-//           <AlertCircle className="w-4 h-4 mt-0.5 text-indigo-600 shrink-0" />
-//         )}
-
-//         <div className="text-xs">
-
-//           {lastStatus}
-
-//           {lastCapturedTime && (
-//             <div className="text-slate-500 mt-1">
-//               Last screenshot:{' '}
-//               {lastCapturedTime}
-//             </div>
-//           )}
-
-//         </div>
-
-//       </div>
-
-//       {/* DATE HISTORY */}
-
-//       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-
-//         <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-
-//           <div>
-
-//             <h2 className="font-bold flex items-center gap-2">
-
-//               <Calendar className="w-5 h-5 text-indigo-600" />
-
-//               My Date-wise Work History
-
-//             </h2>
-
-//             <p className="text-xs text-slate-500 mt-1">
-//               Select a date to view actual tracked time and central screenshots.
-//             </p>
-
-//           </div>
-
-//           <div className="flex items-center gap-2">
-
-//             <input
-//               type="date"
-//               value={
-//                 selectedDate
-//               }
-//               max={
-//                 today
-//               }
-//               onChange={(
-//                 event
-//               ) =>
-//                 setSelectedDate(
-//                   event.target
-//                     .value ||
-//                     today
-//                 )
-//               }
-//               className="px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-//             />
-
-//             <button
-//               type="button"
-//               onClick={
-//                 loadDateHistory
-//               }
-//               className="cursor-pointer p-2 rounded-lg border border-slate-300 dark:border-slate-700"
-//               title="Refresh"
-//             >
-//               <RefreshCw className="w-4 h-4" />
-//             </button>
-
-//           </div>
-
-//         </div>
-
-//         <div className="p-5 space-y-5">
-
-//           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-
-//             <div className="rounded-xl p-4 bg-slate-50 dark:bg-slate-800">
-
-//               <div className="text-[11px] uppercase font-bold text-slate-500">
-//                 Selected Date
-//               </div>
-
-//               <div className="font-bold mt-1">
-//                 {selectedDate}
-//               </div>
-
-//             </div>
-
-//             <div className="rounded-xl p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-
-//               <div className="text-[11px] uppercase font-bold text-slate-500">
-//                 Actual Tracked Time
-//               </div>
-
-//               <div className="text-xl font-black mt-1 text-emerald-600">
-//                 {loadingHistory
-//                   ? 'Loading...'
-//                   : formatSecondsToHoursMinutes(
-//                       selectedDateSeconds
-//                     )}
-//               </div>
-
-//             </div>
-
-//             <div className="rounded-xl p-4 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
-
-//               <div className="text-[11px] uppercase font-bold text-slate-500">
-//                 Screenshots
-//               </div>
-
-//               <div className="text-xl font-black mt-1 text-indigo-600">
-//                 {loadingHistory
-//                   ? '...'
-//                   : selectedDateScreenshotCount}
-//               </div>
-
-//             </div>
-
-//           </div>
-
-//           {/* YEAR > MONTH > DATE HISTORY */}
-
-//           {activityHistory.length > 0 && (
-//             <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-
-//               <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-//                   Year
-//                 </div>
-
-//                 <div className="flex flex-wrap gap-2">
-//                   {historyYears.map((year) => (
-//                     <button
-//                       key={year}
-//                       type="button"
-//                       onClick={() => {
-//                         setSelectedHistoryYear(year);
-
-//                         const firstMonth = activityHistory
-//                           .filter((record) => record.dateKey.startsWith(`${year}-`))
-//                           .map((record) => record.dateKey.slice(0, 7))
-//                           .sort((a, b) => b.localeCompare(a))[0];
-
-//                         if (firstMonth) {
-//                           setSelectedHistoryMonth(firstMonth);
-//                         }
-//                       }}
-//                       className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
-//                         selectedHistoryYear === year
-//                           ? 'bg-indigo-600 text-white border-indigo-600'
-//                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
-//                       }`}
-//                     >
-//                       {year}
-//                     </button>
-//                   ))}
-//                 </div>
-//               </div>
-
-//               <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-//                   Month
-//                 </div>
-
-//                 <div className="flex flex-wrap gap-2">
-//                   {historyMonths.map((month) => (
-//                     <button
-//                       key={month}
-//                       type="button"
-//                       onClick={() => setSelectedHistoryMonth(month)}
-//                       className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
-//                         selectedHistoryMonth === month
-//                           ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-400'
-//                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
-//                       }`}
-//                     >
-//                       {monthLabel(month)}
-//                     </button>
-//                   ))}
-//                 </div>
-//               </div>
-
-//               <div className="p-4">
-//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-//                   Dates
-//                 </div>
-
-//                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-//                   {filteredHistoryDates.map((record) => (
-//                     <button
-//                       key={record.dateKey}
-//                       type="button"
-//                       onClick={() => setSelectedDate(record.dateKey)}
-//                       className={`text-left rounded-xl border p-3 transition ${
-//                         selectedDate === record.dateKey
-//                           ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400'
-//                           : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400'
-//                       }`}
-//                     >
-//                       <div className="font-bold text-sm">
-//                         {new Date(`${record.dateKey}T00:00:00`).toLocaleDateString(
-//                           undefined,
-//                           { day: '2-digit', month: 'short', year: 'numeric' }
-//                         )}
-//                       </div>
-
-//                       <div className="text-[11px] text-slate-500 mt-1">
-//                         {formatSecondsToHoursMinutes(record.totalSeconds)}
-//                         {' • '}
-//                         {record.screenshotCount} screenshot{record.screenshotCount === 1 ? '' : 's'}
-//                       </div>
-//                     </button>
-//                   ))}
-//                 </div>
-//               </div>
-
-//             </div>
-//           )}
-
-//           {/* SCREENSHOTS */}
-
-//           <div>
-
-//             <div className="flex items-center justify-between gap-3 mb-4">
-
-//               <div>
-
-//                 <h3 className="font-bold flex items-center gap-2">
-
-//                   <Camera className="w-4 h-4 text-indigo-600" />
-
-//                   Screenshot History
-
-//                 </h3>
-
-//                 <div className="text-xs text-slate-500 mt-1">
-//                   {selectedDate}
-//                 </div>
-
-//               </div>
-
-//               <div className="text-xs font-bold text-indigo-600">
-//                 {
-//                   mergedScreenshots.length
-//                 }{' '}
-//                 captures
-//               </div>
-
-//             </div>
-
-//             {mergedScreenshots.length ===
-//             0 ? (
-//               <div className="py-14 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
-
-//                 <Camera className="w-10 h-10 mx-auto text-slate-400 mb-2" />
-
-//                 <div className="text-sm font-semibold">
-//                   No screenshots found
-//                 </div>
-
-//                 <div className="text-xs text-slate-500 mt-1">
-//                   No central screenshots are available for {selectedDate}.
-//                 </div>
-
-//               </div>
-//             ) : (
-//               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
-//                 {mergedScreenshots.map(
-//                   (
-//                     screenshot
-//                   ) => (
-//                     <button
-//                       key={
-//                         screenshot.id
-//                       }
-//                       type="button"
-//                       onClick={() =>
-//                         setPreviewModal(
-//                           screenshot
-//                         )
-//                       }
-//                       className="cursor-pointer text-left rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:border-indigo-400 transition"
-//                     >
-
-//                       {(() => {
-//                         const source =
-//                           screenshot.driveThumbnailLink ||
-//                           screenshot.previewDataUrl ||
-//                           '';
-
-//                         const displayUrl =
-//                           employeeScreenshotUrls[source] ||
-//                           (source.startsWith('data:') || source.startsWith('blob:')
-//                             ? source
-//                             : '');
-
-//                         return displayUrl ? (
-//                           <img
-//                             src={displayUrl}
-//                             alt="Screenshot"
-//                             className="w-full aspect-video object-cover bg-slate-950"
-//                           />
-//                         ) : (
-//                           <div className="w-full aspect-video bg-slate-950 flex items-center justify-center text-xs text-slate-400">
-//                             Loading screenshot...
-//                           </div>
-//                         );
-//                       })()}
-
-//                       <div className="p-3">
-
-//                         <div className="text-xs font-bold">
-//                           {
-//                             screenshot.taskName
-//                           }
-//                         </div>
-
-//                         <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-
-//                           <Clock className="w-3 h-3" />
-
-//                           {screenshot.timeFormatted ||
-//                             'Saved capture'}
-
-//                         </div>
-
-//                       </div>
-
-//                     </button>
-//                   )
-//                 )}
-
-//               </div>
-//             )}
-
-//           </div>
-
-//         </div>
-
-//       </div>
-
-//       {/* PREVIEW */}
-
-//       {previewModal && (
-//         <div
-//           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-//           onClick={() =>
-//             setPreviewModal(
-//               null
-//             )
-//           }
-//         >
-
-//           <div
-//             className="w-full max-w-6xl"
-//             onClick={(
-//               event
-//             ) =>
-//               event.stopPropagation()
-//             }
-//           >
-
-//             <div className="flex justify-end mb-2">
-
-//               <button
-//                 type="button"
-//                 onClick={() =>
-//                   setPreviewModal(
-//                     null
-//                   )
-//                 }
-//                 className="cursor-pointer p-2 text-white"
-//               >
-//                 <X className="w-6 h-6" />
-//               </button>
-
-//             </div>
-
-//             <div className="bg-white dark:bg-slate-900 rounded-xl overflow-hidden">
-
-//               {(() => {
-//                 const source =
-//                   previewModal.driveThumbnailLink ||
-//                   previewModal.previewDataUrl ||
-//                   '';
-
-//                 const displayUrl =
-//                   employeeScreenshotUrls[source] ||
-//                   (source.startsWith('data:') || source.startsWith('blob:')
-//                     ? source
-//                     : '');
-
-//                 return displayUrl ? (
-//                   <img
-//                     src={displayUrl}
-//                     alt="Screenshot preview"
-//                     className="w-full max-h-[80vh] object-contain bg-slate-950"
-//                   />
-//                 ) : (
-//                   <div className="min-h-[320px] flex items-center justify-center bg-slate-950 text-slate-400">
-//                     Loading screenshot...
-//                   </div>
-//                 );
-//               })()}
-
-//               <div className="p-4">
-
-//                 <div className="font-bold">
-//                   {
-//                     previewModal.taskName
-//                   }
-//                 </div>
-
-//                 <div className="text-xs text-slate-500 mt-1">
-//                   {
-//                     previewModal.timeFormatted
-//                   }
-//                 </div>
-
-//               </div>
-
-//             </div>
-
-//           </div>
-
-//         </div>
-//       )}
-
-//       {/* HIDDEN VIDEO */}
-
-//       <video
-//         ref={
-//           screenVideoRef
-//         }
-//         autoPlay
-//         muted
-//         playsInline
-//         className="fixed -top-[9999px] -left-[9999px] w-[320px] h-[180px] opacity-[0.001] pointer-events-none"
-//       />
-
-//     </div>
-//   );
-// };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// import React, {
-//   useEffect,
-//   useMemo,
-//   useRef,
-//   useState,
-// } from 'react';
-
-// import {
-//   AppUser,
-//   ScreenshotLog,
-//   StorageSettings,
-// } from '../types';
-
-// import {
-//   Play,
-//   Pause,
-//   Square,
-//   Camera,
-//   Calendar,
-//   Clock,
-//   Monitor,
-//   RefreshCw,
-//   AlertCircle,
-//   X,
-//   CheckCircle2,
-// } from 'lucide-react';
-
-// import {
-//   canvasToBlob,
-//   formatSecondsToHoursMinutes,
-//   formatTimeString,
-//   generateThumbnailDataUrl,
-//   getHourSlotKey,
-//   getTodayDateKey,
-// } from '../lib/utils';
-
-// import {
-//   getLocalScreenshots,
-//   startScreenshotUploadScheduler,
-//   uploadScreenshotLocally,
-// } from '../lib/localStorageService';
-
-// import {
-//   setCachedScreenshot,
-// } from '../lib/screenshotCache';
-
-// import {
-//   ScreenshotViewerImage,
-// } from './ScreenshotViewerImage';
-
-// // ======================================================
-// // BACKEND
-// // ======================================================
 
 // const getBackendUrl = (): string => {
 //   const configured =
@@ -3182,6 +87,20 @@
 
 //   return 'https://codesdot-workmonitor.work-nest.workers.dev';
 // };
+
+// // ====================================================
+// // SCREEN SHARING RECONNECT (after page refresh)
+// // ====================================================
+
+// const RECONNECT_POPUP_TITLE = 'Reconnect screen sharing';
+
+// const RECONNECT_POPUP_MESSAGE =
+//   "Your timer is still running, but screenshots are paused until you share your screen again. Click below, then choose the screen in your browser's sharing window.";
+
+// const RECONNECT_VOICE_MESSAGE =
+//   'Please reconnect your screen sharing to continue tracking.';
+
+// const RECONNECT_REMINDER_MS = 60 * 1000;
 
 // // ====================================================
 // // SCREENSHOT CLOUD UPLOAD WINDOW
@@ -3259,3232 +178,9 @@
 //   mouseMoves: number;
 //   mouseClicks: number;
 //   keyPresses: number;
-// }
-
-// interface ActivityHistoryRecord {
-//   dateKey: string;
-//   totalSeconds: number;
-//   screenshotCount: number;
-// }
-
-// interface EmployeeDashboardProps {
-//   currentUser: AppUser;
-
-//   storageSettings:
-//     StorageSettings;
-
-//   accessToken:
-//     string | null;
-
-//   onConnectDrive:
-//     () => void;
-
-//   onNewScreenshot:
-//     (
-//       log: ScreenshotLog
-//     ) => void;
-
-//   userScreenshots:
-//     ScreenshotLog[];
-
-//   onLogout?:
-//     () => void;
-// }
-
-// // ======================================================
-// // COMPONENT
-// // ======================================================
-
-// export const EmployeeDashboard:
-//   React.FC<
-//     EmployeeDashboardProps
-//   > = ({
-//     currentUser,
-//     storageSettings,
-//     onNewScreenshot,
-//     userScreenshots,
-//     onLogout,
-//   }) => {
-
-//   const backendUrl =
-//     useMemo(
-//       () =>
-//         getBackendUrl(),
-//       []
-//     );
-
-//   const backendHeaders =
-//     useMemo(
-//       () => ({
-//       }),
-//       []
-//     );
-
-//   // ====================================================
-//   // TRACKER
-//   // ====================================================
-
-//   const [
-//     taskName,
-//     setTaskName,
-//   ] =
-//     useState(
-//       'Product Design & Implementation'
-//     );
-
-//   const [
-//     isTracking,
-//     setIsTracking,
-//   ] =
-//     useState(false);
-
-//   const [
-//     isPaused,
-//     setIsPaused,
-//   ] =
-//     useState(false);
-
-//   const [
-//     sessionSeconds,
-//     setSessionSeconds,
-//   ] =
-//     useState(0);
-
-//   const [
-//     dayTotalSeconds,
-//     setDayTotalSeconds,
-//   ] =
-//     useState(0);
-
-//   const [
-//     lastStatus,
-//     setLastStatus,
-//   ] =
-//     useState(
-//       'Ready to start tracking'
-//     );
-
-//   const [
-//     nextCaptureInSec,
-//     setNextCaptureInSec,
-//   ] =
-//     useState<
-//       number | null
-//     >(null);
-
-//   const [
-//     lastCapturedTime,
-//     setLastCapturedTime,
-//   ] =
-//     useState('');
-
-//   // ====================================================
-//   // GLOBAL ADMIN POLICY
-//   // ====================================================
-
-//   const [
-//     captureWindowSeconds,
-//     setCaptureWindowSeconds,
-//   ] =
-//     useState(
-//       Math.max(
-//         5,
-//         Number(
-//           storageSettings
-//             .captureIntervalSeconds ||
-//             600
-//         )
-//       )
-//     );
-
-//   const [
-//     screenshotsPerWindow,
-//     setScreenshotsPerWindow,
-//   ] =
-//     useState(5);
-
-//   const [
-//     capturePresetId,
-//     setCapturePresetId,
-//   ] =
-//     useState('10m-5');
-
-//   const [
-//     centralPolicyUpdatedAt,
-//     setCentralPolicyUpdatedAt,
-//   ] =
-//     useState('');
-
-//   // ====================================================
-//   // HISTORY
-//   // ====================================================
-
-//   const [
-//     selectedDate,
-//     setSelectedDate,
-//   ] =
-//     useState(
-//       getTodayDateKey()
-//     );
-
-//   const [
-//     activityHistory,
-//     setActivityHistory,
-//   ] =
-//     useState<
-//       ActivityHistoryRecord[]
-//     >([]);
-
-//   const [
-//     selectedDateSeconds,
-//     setSelectedDateSeconds,
-//   ] =
-//     useState(0);
-
-//   const [
-//     selectedDateScreenshotCount,
-//     setSelectedDateScreenshotCount,
-//   ] =
-//     useState(0);
-
-//   const [
-//     restoredScreenshots,
-//     setRestoredScreenshots,
-//   ] =
-//     useState<
-//       ScreenshotLog[]
-//     >([]);
-
-//   const [
-//     loadingHistory,
-//     setLoadingHistory,
-//   ] =
-//     useState(false);
-
-//   const [
-//     previewModal,
-//     setPreviewModal,
-//   ] =
-//     useState<
-//       ScreenshotLog | null
-//     >(null);
-
-
-//   // ====================================================
-//   // YEAR / MONTH HISTORY NAVIGATION
-//   // ====================================================
-
-//   const [selectedHistoryYear, setSelectedHistoryYear] =
-//     useState<string>(getTodayDateKey().slice(0, 4));
-
-//   const [selectedHistoryMonth, setSelectedHistoryMonth] =
-//     useState<string>(getTodayDateKey().slice(0, 7));
-
-//   // Blob URLs allow ngrok-protected screenshots to render in <img>.
-//   const [employeeScreenshotUrls, setEmployeeScreenshotUrls] =
-//     useState<Record<string, string>>({});
-
-//   // ====================================================
-//   // SCREEN CAPTURE
-//   // ====================================================
-
-//   const screenVideoRef =
-//     useRef<
-//       HTMLVideoElement | null
-//     >(null);
-
-//   const screenStreamRef =
-//     useRef<
-//       MediaStream | null
-//     >(null);
-
-//   // Counts only activity inside this app's browser window. No key text is read or stored.
-//   const activityCountsRef = useRef<ScreenshotActivityCounts>({
-//     mouseMoves: 0,
-//     mouseClicks: 0,
-//     keyPresses: 0,
-//   });
-
-//   const lastMousePositionRef = useRef({
-//     x: 0,
-//     y: 0,
-//     initialized: false,
-//   });
-
-//   useEffect(() => {
-//     const handleMouseMove = (event: MouseEvent) => {
-//       if (!trackingRef.current || pausedRef.current) return;
-
-//       const last = lastMousePositionRef.current;
-//       const dx = event.clientX - last.x;
-//       const dy = event.clientY - last.y;
-
-//       if (!last.initialized) {
-//         last.x = event.clientX;
-//         last.y = event.clientY;
-//         last.initialized = true;
-//         return;
-//       }
-
-//       // Count a movement after the pointer has moved at least 10 pixels.
-//       if (Math.hypot(dx, dy) >= 10) {
-//         activityCountsRef.current.mouseMoves += 1;
-//         last.x = event.clientX;
-//         last.y = event.clientY;
-//       }
-//     };
-
-//     const handleMouseClick = () => {
-//       if (!trackingRef.current || pausedRef.current) return;
-//       activityCountsRef.current.mouseClicks += 1;
-//     };
-
-//     const handleKeyDown = () => {
-//       if (!trackingRef.current || pausedRef.current) return;
-//       // Intentionally do not inspect event.key or store typed text.
-//       activityCountsRef.current.keyPresses += 1;
-//     };
-
-//     window.addEventListener('mousemove', handleMouseMove);
-//     window.addEventListener('click', handleMouseClick);
-//     window.addEventListener('keydown', handleKeyDown);
-
-//     return () => {
-//       window.removeEventListener('mousemove', handleMouseMove);
-//       window.removeEventListener('click', handleMouseClick);
-//       window.removeEventListener('keydown', handleKeyDown);
-//     };
-//   }, []);
-
-//   const captureTimerRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   const countdownRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   const trackerTimerRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   // Central D1 tracker sync runs only once per minute while actively tracking.
-//   const trackerSyncIntervalRef =
-//     useRef<
-//       number | null
-//     >(null);
-
-//   const trackingRef =
-//     useRef(false);
-
-//   const pausedRef =
-//     useRef(false);
-
-//   const daySecondsRef =
-//     useRef(0);
-
-//   // When a tracking session survives a page refresh, keep the saved
-//   // session duration so the next Start action resumes it instead of
-//   // resetting the current task to zero.
-//   const restoredSessionRef =
-//     useRef(false);
-
-//   const captureWindowRef =
-//     useRef(
-//       captureWindowSeconds
-//     );
-
-//   const capturePolicyRefreshAtRef =
-//     useRef(0);
-
-//   const screenshotCountRef =
-//     useRef(
-//       screenshotsPerWindow
-//     );
-
-//   // ====================================================
-//   // KEEP REFS CURRENT
-//   // ====================================================
-
-//   useEffect(() => {
-//     trackingRef.current =
-//       isTracking;
-//   }, [
-//     isTracking,
-//   ]);
-
-//   useEffect(() => {
-//     pausedRef.current =
-//       isPaused;
-//   }, [
-//     isPaused,
-//   ]);
-
-//   useEffect(() => {
-//     daySecondsRef.current =
-//       dayTotalSeconds;
-//   }, [
-//     dayTotalSeconds,
-//   ]);
-
-//   useEffect(() => {
-//     captureWindowRef.current =
-//       captureWindowSeconds;
-//   }, [
-//     captureWindowSeconds,
-//   ]);
-
-//   useEffect(() => {
-//     screenshotCountRef.current =
-//       screenshotsPerWindow;
-//   }, [
-//     screenshotsPerWindow,
-//   ]);
-
-//   // ====================================================
-//   // LOGIN BOOTSTRAP POLICY (NO POLLING)
-//   // ====================================================
-
-//   useEffect(() => {
-//     try {
-//       const raw = localStorage.getItem('workmonitor_employee_capture_settings');
-//       if (!raw) return;
-
-//       const settings = JSON.parse(raw);
-//       const newWindow = Math.max(5, Number(settings?.captureWindowSeconds || settings?.captureIntervalSeconds || 600));
-//       const newCount = Math.max(1, Number(settings?.screenshotsPerWindow || 5));
-//       const newPreset = String(settings?.presetId || '10m-5');
-
-//       setCaptureWindowSeconds(newWindow);
-//       setScreenshotsPerWindow(newCount);
-//       setCapturePresetId(newPreset);
-//       setCentralPolicyUpdatedAt(String(settings?.updatedAt || ''));
-//       captureWindowRef.current = newWindow;
-//       screenshotCountRef.current = newCount;
-//     } catch (error) {
-//       console.warn('Capture policy bootstrap warning:', error);
-//     }
-//   }, []);
-
-//   // ====================================================
-//   // LOCAL TIMER STORAGE
-//   // ====================================================
-
-//   const timerStorageKey =
-//     `wm_emp_timer_` +
-//     `${currentUser.id}_` +
-//     `${getTodayDateKey()}`;
-
-//   // Restore browser timer
-//   useEffect(() => {
-//     try {
-//       const raw =
-//         localStorage.getItem(
-//           timerStorageKey
-//         );
-
-//       if (!raw) {
-//         return;
-//       }
-
-//       const saved =
-//         JSON.parse(raw);
-
-//       if (
-//         typeof saved
-//           ?.dayTotalSeconds ===
-//         'number'
-//       ) {
-//         setDayTotalSeconds(
-//           Math.max(
-//             0,
-//             saved
-//               .dayTotalSeconds
-//           )
-//         );
-//       }
-
-//       if (
-//         typeof saved
-//           ?.sessionSeconds ===
-//         'number'
-//       ) {
-//         const restoredSessionSeconds = Math.max(
-//           0,
-//           saved.sessionSeconds
-//         );
-
-//         setSessionSeconds(
-//           restoredSessionSeconds
-//         );
-
-//         if (
-//           saved?.isTracking &&
-//           restoredSessionSeconds > 0
-//         ) {
-//           restoredSessionRef.current = true;
-//           setLastStatus(
-//             'Previous tracking time restored. Click Start Tracking to continue.'
-//           );
-//         }
-//       }
-
-//       if (
-//         saved?.taskName
-//       ) {
-//         setTaskName(
-//           saved.taskName
-//         );
-//       }
-//     } catch (
-//       error
-//     ) {
-//       console.warn(
-//         'Timer restore warning:',
-//         error
-//       );
-//     }
-//   }, [
-//     timerStorageKey,
-//   ]);
-
-//   // Save timer
-//   useEffect(() => {
-//     try {
-//       localStorage.setItem(
-//         timerStorageKey,
-
-//         JSON.stringify({
-//           dayTotalSeconds,
-//           sessionSeconds,
-//           taskName,
-//           isTracking,
-//           isPaused,
-//           updatedAt:
-//             Date.now(),
-//         })
-//       );
-//     } catch {
-//       // ignore
-//     }
-//   }, [
-//     timerStorageKey,
-//     dayTotalSeconds,
-//     sessionSeconds,
-//     taskName,
-//     isTracking,
-//     isPaused,
-//   ]);
-
-//   // ====================================================
-//   // CENTRAL TRACKER SYNC
-//   // ====================================================
-
-//   const syncTrackerTime =
-//     async (
-//       seconds =
-//         daySecondsRef.current
-//     ) => {
-//       try {
-//         const response =
-//           await fetch(
-//             `${backendUrl}/api/tracker-time`,
-//             {
-//               method:
-//                 'POST',
-
-//               headers: {
-//                 ...backendHeaders,
-//                 'Content-Type':
-//                   'application/json',
-//               },
-
-//               body:
-//                 JSON.stringify({
-//                   employeeId:
-//                     currentUser.id,
-
-//                   employeeName:
-//                     currentUser.name,
-
-//                   dateKey:
-//                     getTodayDateKey(),
-
-//                   totalSeconds:
-//                     Math.max(
-//                       0,
-//                       Math.floor(
-//                         seconds
-//                       )
-//                     ),
-//                 }),
-//             }
-//           );
-
-//         const data =
-//           await readApiJson(
-//             response
-//           );
-
-//         if (
-//           !response.ok ||
-//           !data?.success
-//         ) {
-//           throw new Error(
-//             data?.error ||
-//               'Tracker sync failed'
-//           );
-//         }
-
-//         return Number(
-//           data.totalSeconds ||
-//             seconds
-//         );
-//       } catch (
-//         error
-//       ) {
-//         console.warn(
-//           'Tracker sync warning:',
-//           error
-//         );
-
-//         return seconds;
-//       }
-//     };
-
-//   // ====================================================
-//   // TIMER
-//   // ====================================================
-
-//   useEffect(() => {
-//     if (
-//       isTracking &&
-//       !isPaused
-//     ) {
-//       trackerTimerRef.current =
-//         window.setInterval(
-//           () => {
-//             setSessionSeconds(
-//               (
-//                 previous
-//               ) =>
-//                 previous +
-//                 1
-//             );
-
-//             setDayTotalSeconds(
-//               (
-//                 previous
-//               ) =>
-//                 previous +
-//                 1
-//             );
-//           },
-//           1000
-//         );
-//     } else {
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-
-//         trackerTimerRef.current =
-//           null;
-//       }
-//     }
-
-//     return () => {
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-//       }
-//     };
-//   }, [
-//     isTracking,
-//     isPaused,
-//   ]);
-
-//   // ====================================================
-//   // PERIODIC CENTRAL TRACKER SYNC
-//   // ====================================================
-//   // Keep Cloudflare D1 updated while the employee is working.
-//   // This runs once every 60 seconds only while actively tracking.
-//   // It does not poll while paused or stopped.
-
-//   useEffect(() => {
-//     if (
-//       !isTracking ||
-//       isPaused
-//     ) {
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
-
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
-
-//       return;
-//     }
-
-//     // The Start action already performs the initial sync.
-//     // The interval handles subsequent updates.
-//     trackerSyncIntervalRef.current =
-//       window.setInterval(
-//         () => {
-//           if (
-//             trackingRef.current &&
-//             !pausedRef.current
-//           ) {
-//             void syncTrackerTime(
-//               daySecondsRef.current
-//             );
-//           }
-//         },
-//         60 * 1000
-//       );
-
-//     return () => {
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
-
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
-//     };
-//   }, [
-//     isTracking,
-//     isPaused,
-//   ]);
-
-//   // ====================================================
-//   // SCREEN SHARE
-//   // ====================================================
-
-//   const initScreenStream =
-//     async () => {
-//       try {
-//         if (
-//           !window.isSecureContext ||
-//           !navigator
-//             .mediaDevices ||
-//           typeof navigator
-//             .mediaDevices
-//             .getDisplayMedia !==
-//             'function'
-//         ) {
-//           throw new Error(
-//             'Screen capture requires HTTPS.'
-//           );
-//         }
-
-//         if (
-//           screenStreamRef
-//             .current
-//             ?.active
-//         ) {
-//           return (
-//             screenStreamRef
-//               .current
-//           );
-//         }
-
-//         let stream:
-//           MediaStream;
-
-//         try {
-//           stream =
-//             await navigator
-//               .mediaDevices
-//               .getDisplayMedia({
-//                 video: {
-//                   displaySurface:
-//                     'monitor',
-
-//                   frameRate: {
-//                     ideal:
-//                       5,
-
-//                     max:
-//                       15,
-//                   },
-//                 },
-
-//                 audio:
-//                   false,
-
-//                 monitorTypeSurfaces:
-//                   'include',
-
-//                 selfBrowserSurface:
-//                   'exclude',
-
-//                 surfaceSwitching:
-//                   'exclude',
-
-//                 preferCurrentTab:
-//                   false,
-//               } as any);
-//         } catch {
-//           stream =
-//             await navigator
-//               .mediaDevices
-//               .getDisplayMedia({
-//                 video:
-//                   true,
-
-//                 audio:
-//                   false,
-//               });
-//         }
-
-//         const videoTrack =
-//           stream.getVideoTracks()[
-//             0
-//           ];
-
-//         if (
-//           videoTrack
-//         ) {
-//           videoTrack.onended =
-//             () => {
-//               screenStreamRef.current =
-//                 null;
-
-//               if (
-//                 screenVideoRef.current
-//               ) {
-//                 screenVideoRef.current.srcObject =
-//                   null;
-//               }
-
-//               setLastStatus(
-//                 'Screen sharing stopped. Start tracking again to continue.'
-//               );
-
-//               setIsTracking(
-//                 false
-//               );
-
-//               setIsPaused(
-//                 false
-//               );
-//             };
-//         }
-
-//         screenStreamRef.current =
-//           stream;
-
-//         if (
-//           screenVideoRef.current
-//         ) {
-//           screenVideoRef.current.srcObject =
-//             stream;
-
-//           await screenVideoRef.current
-//             .play()
-//             .catch(
-//               () => {}
-//             );
-//         }
-
-//         return stream;
-//       } catch (
-//         error: any
-//       ) {
-//         console.error(
-//           'Screen permission error:',
-//           error
-//         );
-
-//         setLastStatus(
-//           `Screen capture permission required: ${
-//             error?.message ||
-//             'Cancelled'
-//           }`
-//         );
-
-//         return null;
-//       }
-//     };
-
-//   // ====================================================
-//   // CAPTURE CANVAS
-//   // ====================================================
-
-//   const captureCurrentScreen =
-//     async (
-//       stream:
-//         MediaStream
-//     ) => {
-
-//       let video =
-//         screenVideoRef.current;
-
-//       if (!video) {
-//         return null;
-//       }
-
-//       if (
-//         video.srcObject !==
-//         stream
-//       ) {
-//         video.srcObject =
-//           stream;
-//       }
-
-//       await video
-//         .play()
-//         .catch(
-//           () => {}
-//         );
-
-//       let attempts =
-//         0;
-
-//       while (
-//         (!video.videoWidth ||
-//           !video.videoHeight) &&
-//         attempts <
-//           30
-//       ) {
-//         await new Promise(
-//           (
-//             resolve
-//           ) =>
-//             setTimeout(
-//               resolve,
-//               100
-//             )
-//         );
-
-//         attempts++;
-//       }
-
-//       if (
-//         !video.videoWidth ||
-//         !video.videoHeight
-//       ) {
-//         throw new Error(
-//           'Screen frame is not ready.'
-//         );
-//       }
-
-//       const canvas =
-//         document.createElement(
-//           'canvas'
-//         );
-
-//       canvas.width =
-//         video.videoWidth;
-
-//       canvas.height =
-//         video.videoHeight;
-
-//       const ctx =
-//         canvas.getContext(
-//           '2d',
-//           {
-//             alpha:
-//               false,
-//           }
-//         );
-
-//       if (!ctx) {
-//         throw new Error(
-//           'Canvas unavailable.'
-//         );
-//       }
-
-//       ctx.drawImage(
-//         video,
-//         0,
-//         0,
-//         canvas.width,
-//         canvas.height
-//       );
-
-//       return canvas;
-//     };
-
-//   // ====================================================
-//   // SCREENSHOT UPLOAD
-//   // ====================================================
-
-//   const captureAndUpload =
-//     async () => {
-//       if (
-//         !trackingRef.current ||
-//         pausedRef.current
-//       ) {
-//         return;
-//       }
-
-//       try {
-//         setLastStatus(
-//           'Capturing screenshot...'
-//         );
-
-//         const stream =
-//           await initScreenStream();
-
-//         if (!stream) {
-//           return;
-//         }
-
-//         const canvas =
-//           await captureCurrentScreen(
-//             stream
-//           );
-
-//         if (!canvas) {
-//           return;
-//         }
-
-//         const format =
-//           storageSettings
-//             .screenshotFormat ||
-//           'webp';
-
-//         const {
-//           blob,
-//           mimeType,
-//           extension,
-//         } =
-//           await canvasToBlob(
-//             canvas,
-//             format
-//           );
-
-//         const now =
-//           new Date();
-
-//         const dateKey =
-//           getTodayDateKey(
-//             now
-//           );
-
-//         const timeFormatted =
-//           formatTimeString(
-//             now
-//           );
-
-//         const hourKey =
-//           getHourSlotKey(
-//             now
-//           );
-
-//         const safeTime =
-//           now
-//             .toTimeString()
-//             .split(' ')[0]
-//             .replace(
-//               /:/g,
-//               '-'
-//             );
-
-//         const fileName =
-//           `Screen_${dateKey}_${safeTime}.${extension}`;
-
-//         const result =
-//           await uploadScreenshotLocally(
-//             blob,
-//             fileName,
-//             currentUser.id,
-//             currentUser.name,
-//             dateKey
-//           );
-
-//         const thumbnail =
-//           generateThumbnailDataUrl(
-//             canvas,
-//             640,
-//             360,
-//             0.75
-//           );
-
-//         const fullDataUrl =
-//           canvas.toDataURL(
-//             mimeType,
-//             0.9
-//           );
-
-//         const activityCounts = {
-//           ...activityCountsRef.current,
-//         };
-
-//         const id =
-//           `scr-${Date.now()}`;
-
-//         setCachedScreenshot(
-//           id,
-//           fullDataUrl
-//         );
-
-//         const log = {
-//             id,
-
-//             userId:
-//               currentUser.id,
-
-//             userName:
-//               currentUser.name,
-
-//             userEmail:
-//               currentUser.email,
-
-//             taskName,
-
-//             timestamp:
-//               now.toISOString(),
-
-//             timeFormatted,
-
-//             hourKey,
-
-//             dateKey,
-
-//             activityCounts,
-
-//             fileFormat:
-//               format,
-
-//             driveFileId:
-//               result.fileId,
-
-//             driveThumbnailLink:
-//               result.localUrl,
-
-//             previewDataUrl:
-//               thumbnail,
-
-//             productivityScore:
-//               92,
-
-//             productivityLabel:
-//               'High',
-//           } as ScreenshotLog & {
-//             activityCounts: ScreenshotActivityCounts;
-//           };
-
-//         onNewScreenshot(
-//           log
-//         );
-
-//         // Start a fresh activity interval for the next screenshot.
-//         activityCountsRef.current = {
-//           mouseMoves: 0,
-//           mouseClicks: 0,
-//           keyPresses: 0,
-//         };
-//         lastMousePositionRef.current = {
-//           x: 0,
-//           y: 0,
-//           initialized: false,
-//         };
-
-//         // Update the visible selected-date count immediately for this local
-//         // capture. The IndexedDB queue is not counted by the Worker until the
-//         // hourly batch upload succeeds.
-//         if (selectedDate === dateKey) {
-//           setSelectedDateScreenshotCount(
-//             (previous) => previous + 1
-//           );
-//         }
-
-//         setLastCapturedTime(
-//           timeFormatted
-//         );
-
-//         setLastStatus(
-//           `✅ Screenshot saved locally and queued for cloud upload. ${
-//             isScreenshotUploadWindowOpen()
-//               ? 'Cloud upload runs in hourly batches.'
-//               : 'Cloud sharing is paused outside 08:30 AM–08:30 PM IST.'
-//           }`
-//         );
-
-//         // Do not reload cloud history after every screenshot.
-//         // The screenshot is already added to the local UI via onNewScreenshot().
-//         // History is fetched only when the user explicitly opens/refreshes it.
-//       } catch (
-//         error: any
-//       ) {
-//         console.error(
-//           'Capture error:',
-//           error
-//         );
-
-//         setLastStatus(
-//           `Capture warning: ${
-//             error?.message ||
-//             'Unknown error'
-//           }`
-//         );
-//       }
-//     };
-
-//   // ====================================================
-//   // RANDOM SCREENSHOT WINDOW
-//   // ====================================================
-
-//   const clearCaptureTimers =
-//     () => {
-//       if (
-//         captureTimerRef.current
-//       ) {
-//         clearTimeout(
-//           captureTimerRef.current
-//         );
-
-//         captureTimerRef.current =
-//           null;
-//       }
-
-//       if (
-//         countdownRef.current
-//       ) {
-//         clearInterval(
-//           countdownRef.current
-//         );
-
-//         countdownRef.current =
-//           null;
-//       }
-//     };
-
-//   const scheduleRandomWindow =
-//     (
-//       windowSeconds =
-//         captureWindowRef.current,
-
-//       screenshotCount =
-//         screenshotCountRef.current
-//     ) => {
-
-//       clearCaptureTimers();
-
-//       if (
-//         !trackingRef.current ||
-//         pausedRef.current
-//       ) {
-//         return;
-//       }
-
-//       const safeWindow =
-//         Math.max(
-//           5,
-//           Math.floor(
-//             Number(
-//               windowSeconds
-//             ) || 600
-//           )
-//         );
-
-//       const safeCount =
-//         Math.max(
-//           1,
-//           Math.floor(
-//             Number(
-//               screenshotCount
-//             ) || 1
-//           )
-//         );
-
-//       const windowMs =
-//         safeWindow *
-//         1000;
-
-//       // Divide full window into random zones.
-//       // This keeps shots random but prevents them
-//       // all coming at exactly the same second.
-//       const randomPositions =
-//         Array.from(
-//           {
-//             length:
-//               safeCount,
-//           },
-
-//           (
-//             _,
-//             index
-//           ) => {
-
-//             const zoneStart =
-//               (
-//                 windowMs *
-//                 index
-//               ) /
-//               safeCount;
-
-//             const zoneEnd =
-//               (
-//                 windowMs *
-//                 (
-//                   index +
-//                   1
-//                 )
-//               ) /
-//               safeCount;
-
-//             const padding =
-//               Math.min(
-//                 500,
-//                 Math.max(
-//                   50,
-//                   (
-//                     zoneEnd -
-//                     zoneStart
-//                   ) *
-//                     0.05
-//                 )
-//               );
-
-//             const start =
-//               zoneStart +
-//               padding;
-
-//             const end =
-//               Math.max(
-//                 start +
-//                   25,
-//                 zoneEnd -
-//                   padding
-//               );
-
-//             return Math.floor(
-//               start +
-//                 Math.random() *
-//                   (
-//                     end -
-//                     start
-//                   )
-//             );
-//           }
-//         ).sort(
-//           (
-//             a,
-//             b
-//           ) =>
-//             a - b
-//         );
-
-//       let index =
-//         0;
-
-//       let elapsedPosition =
-//         0;
-
-//       const scheduleNext =
-//         () => {
-
-//           if (
-//             !trackingRef.current ||
-//             pausedRef.current
-//           ) {
-//             clearCaptureTimers();
-//             return;
-//           }
-
-//           // All screenshots done.
-//           // Wait until current window finishes,
-//           // then generate a fresh random window.
-//           if (
-//             index >=
-//             randomPositions.length
-//           ) {
-//             const remaining =
-//               Math.max(
-//                 100,
-//                 windowMs -
-//                   elapsedPosition
-//               );
-
-//             setNextCaptureInSec(
-//               Math.ceil(
-//                 remaining /
-//                   1000
-//               )
-//             );
-
-//             countdownRef.current =
-//               window.setInterval(
-//                 () => {
-//                   setNextCaptureInSec(
-//                     (
-//                       previous
-//                     ) =>
-//                       previous ===
-//                         null ||
-//                       previous <=
-//                         1
-//                         ? 0
-//                         : previous -
-//                           1
-//                   );
-//                 },
-//                 1000
-//               );
-
-//             captureTimerRef.current =
-//               window.setTimeout(
-//                 () => {
-//                   clearCaptureTimers();
-
-//                   scheduleRandomWindow(
-//                     safeWindow,
-//                     safeCount
-//                   );
-//                 },
-//                 remaining
-//               );
-
-//             return;
-//           }
-
-//           const position =
-//             randomPositions[
-//               index
-//             ];
-
-//           const delay =
-//             Math.max(
-//               50,
-//               position -
-//                 elapsedPosition
-//             );
-
-//           setNextCaptureInSec(
-//             Math.max(
-//               1,
-//               Math.ceil(
-//                 delay /
-//                   1000
-//               )
-//             )
-//           );
-
-//           countdownRef.current =
-//             window.setInterval(
-//               () => {
-//                 setNextCaptureInSec(
-//                   (
-//                     previous
-//                   ) =>
-//                     previous ===
-//                       null ||
-//                     previous <=
-//                       1
-//                       ? 0
-//                       : previous -
-//                         1
-//                 );
-//               },
-//               1000
-//             );
-
-//           captureTimerRef.current =
-//             window.setTimeout(
-//               async () => {
-
-//                 if (
-//                   countdownRef.current
-//                 ) {
-//                   clearInterval(
-//                     countdownRef.current
-//                   );
-
-//                   countdownRef.current =
-//                     null;
-//                 }
-
-//                 await captureAndUpload();
-
-//                 elapsedPosition =
-//                   position;
-
-//                 index++;
-
-//                 scheduleNext();
-//               },
-//               delay
-//             );
-//         };
-
-//       scheduleNext();
-//     };
-
-//   // ====================================================
-//   // CAPTURE POLICY REFRESH (FOCUS/VISIBILITY ONLY)
-//   // ====================================================
-//   // Admin changes are picked up when the employee returns to the tab.
-//   // There is deliberately no interval polling.
-//   const refreshCapturePolicy = async () => {
-//     const now = Date.now();
-
-//     // Focus + visibilitychange can fire together. Avoid duplicate
-//     // requests while still picking up admin changes quickly.
-//     if (
-//       now -
-//         capturePolicyRefreshAtRef.current <
-//       30000
-//     ) {
-//       return;
-//     }
-
-//     capturePolicyRefreshAtRef.current = now;
-
-//     try {
-//       const response = await fetch(
-//         `${backendUrl}/api/capture-settings`,
-//         {
-//           cache: 'no-store',
-//           headers: backendHeaders,
-//         }
-//       );
-
-//       const data = await readApiJson(response);
-
-//       if (
-//         !response.ok ||
-//         !data?.success ||
-//         !data?.settings
-//       ) {
-//         return;
-//       }
-
-//       const settings = data.settings;
-//       const newWindow = Math.max(
-//         5,
-//         Number(
-//           settings.captureWindowSeconds ||
-//           settings.captureIntervalSeconds ||
-//           600
-//         )
-//       );
-//       const newCount = Math.max(
-//         1,
-//         Number(settings.screenshotsPerWindow || 5)
-//       );
-//       const newPreset = String(
-//         settings.presetId || 'custom'
-//       );
-//       const newUpdatedAt = String(
-//         settings.updatedAt || ''
-//       );
-
-//       const changed =
-//         newWindow !== captureWindowRef.current ||
-//         newCount !== screenshotCountRef.current ||
-//         newPreset !== capturePresetId ||
-//         newUpdatedAt !== centralPolicyUpdatedAt;
-
-//       setCaptureWindowSeconds(newWindow);
-//       setScreenshotsPerWindow(newCount);
-//       setCapturePresetId(newPreset);
-//       setCentralPolicyUpdatedAt(newUpdatedAt);
-
-//       captureWindowRef.current = newWindow;
-//       screenshotCountRef.current = newCount;
-
-//       if (
-//         changed &&
-//         trackingRef.current &&
-//         !pausedRef.current
-//       ) {
-//         scheduleRandomWindow(
-//           newWindow,
-//           newCount
-//         );
-//       }
-
-//       try {
-//         localStorage.setItem(
-//           'workmonitor_employee_capture_settings',
-//           JSON.stringify(settings)
-//         );
-//       } catch {
-//         // ignore local cache errors
-//       }
-//     } catch (error) {
-//       console.warn(
-//         'Capture policy refresh warning:',
-//         error
-//       );
-//     }
-//   };
-
-//   useEffect(() => {
-//     const handleVisibilityOrFocus = () => {
-//       if (
-//         document.visibilityState === 'visible'
-//       ) {
-//         void refreshCapturePolicy();
-//       }
-//     };
-
-//     window.addEventListener(
-//       'focus',
-//       handleVisibilityOrFocus
-//     );
-//     document.addEventListener(
-//       'visibilitychange',
-//       handleVisibilityOrFocus
-//     );
-
-//     return () => {
-//       window.removeEventListener(
-//         'focus',
-//         handleVisibilityOrFocus
-//       );
-//       document.removeEventListener(
-//         'visibilitychange',
-//         handleVisibilityOrFocus
-//       );
-//     };
-//   }, [backendUrl, capturePresetId, centralPolicyUpdatedAt]);
-
-//   // ====================================================
-//   // HOURLY CLOUD UPLOAD QUEUE
-//   // ====================================================
-
-//   useEffect(() => {
-//     const stopScheduler = startScreenshotUploadScheduler();
-//     return stopScheduler;
-//   }, []);
-
-//   // ====================================================
-//   // GLOBAL POLICY
-//   // ====================================================
-//   // Capture policy is supplied by employee login and cached locally.
-//   // No background /api/capture-settings polling is performed.
-
-//   // ====================================================
-//   // HISTORY
-//   // ====================================================
-
-//   const loadDateHistory =
-//     async () => {
-//       setLoadingHistory(
-//         true
-//       );
-//       // Reset the selected-date count before loading a different date so an
-//       // older date's screenshot count is not carried into the new selection.
-//       setSelectedDateScreenshotCount(0);
-
-//       try {
-//         const [
-//           historyResponse,
-//           activityResponse,
-//         ] =
-//           await Promise.all([
-//             fetch(
-//               `${backendUrl}/api/activity-history/${encodeURIComponent(
-//                 currentUser.id
-//               )}`,
-//               {
-//                 cache:
-//                   'no-store',
-//                 headers:
-//                   backendHeaders,
-//               }
-//             ),
-
-//             fetch(
-//               `${backendUrl}/api/activity/${encodeURIComponent(
-//                 currentUser.id
-//               )}/${encodeURIComponent(
-//                 selectedDate
-//               )}`,
-//               {
-//                 cache:
-//                   'no-store',
-//                 headers:
-//                   backendHeaders,
-//               }
-//             ),
-//           ]);
-
-//         const historyData =
-//           await readApiJson(
-//             historyResponse
-//           );
-
-//         const activityData =
-//           await readApiJson(
-//             activityResponse
-//           );
-
-//         if (
-//           historyResponse.ok &&
-//           historyData
-//             ?.success
-//         ) {
-//           setActivityHistory(
-//             Array.isArray(
-//               historyData.records
-//             )
-//               ? historyData.records
-//               : []
-//           );
-//         }
-
-//         if (
-//           activityResponse.ok &&
-//           activityData
-//             ?.success
-//         ) {
-//           setSelectedDateSeconds(
-//             Math.max(
-//               0,
-//               Number(
-//                 activityData
-//                   .totalSeconds ||
-//                   0
-//               )
-//             )
-//           );
-
-//           setSelectedDateScreenshotCount(
-//             Math.max(
-//               0,
-//               Number(
-//                 activityData
-//                   .screenshotCount ||
-//                   0
-//               )
-//             )
-//           );
-//         } else {
-//           setSelectedDateSeconds(
-//             0
-//           );
-
-//           setSelectedDateScreenshotCount(
-//             0
-//           );
-//         }
-
-//         // Central files
-//         const files =
-//           await getLocalScreenshots(
-//             currentUser.id,
-//             selectedDate
-//           );
-
-//         const restored:
-//           ScreenshotLog[] =
-//           files.map(
-//             (
-//               item,
-//               index
-//             ) => {
-
-//               const fileName =
-//                 item.fileName;
-
-//               const url =
-//                 item.localUrl;
-
-//               const match =
-//                 fileName.match(
-//                   /Screen_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})\.(webp|png|jpg|jpeg)$/i
-//                 );
-
-//               let timestamp =
-//                 `${selectedDate}T00:00:00`;
-
-//               let timeFormatted =
-//                 '';
-
-//               let hourKey =
-//                 '';
-
-//               if (match) {
-//                 const [
-//                   ,
-//                   date,
-//                   hh,
-//                   mm,
-//                   ss,
-//                 ] =
-//                   match;
-
-//                 const dateObject =
-//                   new Date(
-//                     `${date}T${hh}:${mm}:${ss}`
-//                   );
-
-//                 timestamp =
-//                   dateObject.toISOString();
-
-//                 timeFormatted =
-//                   formatTimeString(
-//                     dateObject
-//                   );
-
-//                 hourKey =
-//                   getHourSlotKey(
-//                     dateObject
-//                   );
-//               }
-
-//               const extension =
-//                 fileName
-//                   .toLowerCase()
-//                   .endsWith(
-//                     '.png'
-//                   )
-//                   ? 'png'
-//                   : fileName
-//                       .toLowerCase()
-//                       .match(
-//                         /\.jpe?g$/
-//                       )
-//                     ? 'jpg'
-//                     : 'webp';
-
-//               return {
-//                 id:
-//                   `saved-${selectedDate}-${fileName}-${index}`,
-
-//                 userId:
-//                   currentUser.id,
-
-//                 userName:
-//                   currentUser.name,
-
-//                 userEmail:
-//                   currentUser.email,
-
-//                 taskName:
-//                   'Saved Screenshot',
-
-//                 timestamp,
-
-//                 timeFormatted,
-
-//                 hourKey,
-
-//                 dateKey:
-//                   selectedDate,
-
-//                 fileFormat:
-//                   extension,
-
-//                 driveFileId:
-//                   fileName,
-
-//                 driveThumbnailLink:
-//                   url,
-
-//                 previewDataUrl:
-//                   url,
-//               };
-//             }
-//           );
-
-//         restored.sort(
-//           (
-//             a,
-//             b
-//           ) =>
-//             new Date(
-//               b.timestamp
-//             ).getTime() -
-//             new Date(
-//               a.timestamp
-//             ).getTime()
-//         );
-
-//         setRestoredScreenshots(
-//           restored
-//         );
-
-//         // The API count includes centrally uploaded screenshots only. Also
-//         // count locally queued screenshots so the employee sees captures
-//         // before their next hourly upload.
-//         setSelectedDateScreenshotCount(
-//           (currentCount) => Math.max(currentCount, restored.length)
-//         );
-//       } catch (
-//         error
-//       ) {
-//         console.warn(
-//           'History warning:',
-//           error
-//         );
-//       } finally {
-//         setLoadingHistory(
-//           false
-//         );
-//       }
-//     };
-
-//   // Load history when the dashboard opens and when the employee selects a
-//   // different date. This is event-driven, not polling, so it avoids repeated
-//   // Worker requests while keeping the selected date's history accurate.
-//   useEffect(() => {
-//     void loadDateHistory();
-//     // loadDateHistory is intentionally omitted because it is recreated on
-//     // render; the stable triggers are the user ID and selected date.
-//     // eslint-disable-next-line react-hooks/exhaustive-deps
-//   }, [currentUser.id, selectedDate]);
-
-//   // ====================================================
-//   // MERGE SCREENSHOTS
-//   // ====================================================
-
-//   const mergedScreenshots =
-//     useMemo(() => {
-
-//       const map =
-//         new Map<
-//           string,
-//           ScreenshotLog
-//         >();
-
-//       restoredScreenshots.forEach(
-//         (
-//           screenshot
-//         ) => {
-
-//           const key =
-//             screenshot
-//               .driveThumbnailLink ||
-//             screenshot
-//               .driveFileId ||
-//             screenshot.id;
-
-//           map.set(
-//             key,
-//             screenshot
-//           );
-//         }
-//       );
-
-//       userScreenshots.forEach(
-//         (
-//           screenshot
-//         ) => {
-
-//           if (
-//             screenshot.dateKey !==
-//             selectedDate
-//           ) {
-//             return;
-//           }
-
-//           const key =
-//             screenshot
-//               .driveThumbnailLink ||
-//             screenshot
-//               .driveFileId ||
-//             screenshot.id;
-
-//           map.set(
-//             key,
-//             screenshot
-//           );
-//         }
-//       );
-
-//       return Array.from(
-//         map.values()
-//       ).sort(
-//         (
-//           a,
-//           b
-//         ) =>
-//           new Date(
-//             b.timestamp
-//           ).getTime() -
-//           new Date(
-//             a.timestamp
-//           ).getTime()
-//       );
-//     }, [
-//       restoredScreenshots,
-//       userScreenshots,
-//       selectedDate,
-//     ]);
-
-//   // ====================================================
-//   // YEAR / MONTH HISTORY GROUPS
-//   // ====================================================
-
-//   const historyYears = useMemo(() => {
-//     return Array.from(
-//       new Set(
-//         activityHistory
-//           .map((record) => record.dateKey.slice(0, 4))
-//           .filter(Boolean)
-//       )
-//     ).sort((a, b) => b.localeCompare(a));
-//   }, [activityHistory]);
-
-//   const historyMonths = useMemo(() => {
-//     return Array.from(
-//       new Set(
-//         activityHistory
-//           .filter((record) => record.dateKey.startsWith(`${selectedHistoryYear}-`))
-//           .map((record) => record.dateKey.slice(0, 7))
-//       )
-//     ).sort((a, b) => b.localeCompare(a));
-//   }, [activityHistory, selectedHistoryYear]);
-
-//   const filteredHistoryDates = useMemo(() => {
-//     return activityHistory
-//       .filter((record) => record.dateKey.startsWith(`${selectedHistoryMonth}-`))
-//       .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-//   }, [activityHistory, selectedHistoryMonth]);
-
-//   useEffect(() => {
-//     if (!activityHistory.length) return;
-
-//     const preferredYear =
-//       historyYears.includes(selectedDate.slice(0, 4))
-//         ? selectedDate.slice(0, 4)
-//         : historyYears[0];
-
-//     if (preferredYear && preferredYear !== selectedHistoryYear) {
-//       setSelectedHistoryYear(preferredYear);
-//     }
-//   }, [activityHistory, historyYears, selectedDate, selectedHistoryYear]);
-
-//   useEffect(() => {
-//     if (!historyMonths.length) return;
-
-//     const dateMonth = selectedDate.slice(0, 7);
-//     const preferredMonth =
-//       historyMonths.includes(dateMonth)
-//         ? dateMonth
-//         : historyMonths[0];
-
-//     if (preferredMonth && preferredMonth !== selectedHistoryMonth) {
-//       setSelectedHistoryMonth(preferredMonth);
-//     }
-//   }, [historyMonths, selectedDate, selectedHistoryMonth]);
-
-//   const monthLabel = (monthKey: string) => {
-//     const [year, month] = monthKey.split('-').map(Number);
-//     return new Date(year, Math.max(0, month - 1), 1).toLocaleString(
-//       undefined,
-//       { month: 'long' }
-//     );
-//   };
-
-//   // ====================================================
-//   // EMPLOYEE SCREENSHOT IMAGE LOADING
-//   // ====================================================
-//   // Only fetch a screenshot image once per source URL.
-//   // Previously this effect refetched EVERY existing screenshot whenever
-//   // mergedScreenshots changed. Because a new screenshot changed that array,
-//   // one new screenshot could trigger hundreds of old image requests again.
-//   const employeeScreenshotUrlCacheRef =
-//     useRef<Record<string, string>>({});
-
-//   useEffect(() => {
-//     let cancelled = false;
-
-//     const loadImages = async () => {
-//       const loaded: Record<string, string> = {};
-//       const cache = employeeScreenshotUrlCacheRef.current;
-
-//       for (const screenshot of mergedScreenshots) {
-//         const source =
-//           screenshot.driveThumbnailLink ||
-//           screenshot.previewDataUrl ||
-//           '';
-
-//         if (!source || cancelled) continue;
-
-//         // Fresh in-browser captures are already data/blob URLs.
-//         if (source.startsWith('data:') || source.startsWith('blob:')) {
-//           loaded[source] = source;
-//           continue;
-//         }
-
-//         // Reuse an already-loaded cloud image instead of fetching it again.
-//         const cachedUrl = cache[source];
-//         if (cachedUrl) {
-//           loaded[source] = cachedUrl;
-//           continue;
-//         }
-
-//         try {
-//           const response = await fetch(source, {
-//             method: 'GET',
-//             cache: 'force-cache',
-//             headers: {
-//             },
-//           });
-
-//           if (!response.ok) {
-//             throw new Error(`HTTP ${response.status}`);
-//           }
-
-//           const blob = await response.blob();
-//           if (cancelled) return;
-
-//           const objectUrl = URL.createObjectURL(blob);
-//           cache[source] = objectUrl;
-//           loaded[source] = objectUrl;
-//         } catch (error) {
-//           // Keep a direct image URL as a fallback. Cross-origin <img> can
-//           // display images even when fetch() -> Blob is blocked by CORS.
-//           // This avoids a blank Employee Screenshot History when Admin can
-//           // already see the same uploaded screenshot.
-//           console.warn(
-//             'Employee screenshot fetch failed; using direct image URL:',
-//             screenshot.driveFileId,
-//             error
-//           );
-//           loaded[source] = source;
-//         }
-//       }
-
-//       if (!cancelled) {
-//         setEmployeeScreenshotUrls(loaded);
-//       }
-//     };
-
-//     void loadImages();
-
-//     return () => {
-//       cancelled = true;
-//     };
-//   }, [mergedScreenshots]);
-
-//   // ====================================================
-//   // START
-//   // ====================================================
-
-//   const startTracking =
-//     async () => {
-
-//       const stream =
-//         await initScreenStream();
-
-//       if (!stream) {
-//         return;
-//       }
-
-//       trackingRef.current =
-//         true;
-
-//       pausedRef.current =
-//         false;
-
-//       setIsTracking(
-//         true
-//       );
-
-//       setIsPaused(
-//         false
-//       );
-
-//       if (restoredSessionRef.current) {
-//         restoredSessionRef.current = false;
-//       } else {
-//         setSessionSeconds(0);
-//       }
-
-//       setLastStatus(
-//         '✅ Tracking started'
-//       );
-
-//       await syncTrackerTime();
-
-//       scheduleRandomWindow(
-//         captureWindowRef.current,
-//         screenshotCountRef.current
-//       );
-//     };
-
-//   // ====================================================
-//   // PAUSE
-//   // ====================================================
-
-//   const pauseTracking =
-//     async () => {
-
-//       pausedRef.current =
-//         true;
-
-//       setIsPaused(
-//         true
-//       );
-
-//       clearCaptureTimers();
-
-//       setNextCaptureInSec(
-//         null
-//       );
-
-//       await syncTrackerTime();
-
-//       setLastStatus(
-//         'Tracking paused'
-//       );
-//     };
-
-//   // ====================================================
-//   // RESUME
-//   // ====================================================
-
-//   const resumeTracking =
-//     () => {
-
-//       pausedRef.current =
-//         false;
-
-//       setIsPaused(
-//         false
-//       );
-
-//       scheduleRandomWindow(
-//         captureWindowRef.current,
-//         screenshotCountRef.current
-//       );
-
-//       setLastStatus(
-//         'Tracking resumed'
-//       );
-//     };
-
-//   // ====================================================
-//   // STOP
-//   // ====================================================
-
-//   const stopTracking =
-//     async () => {
-
-//       await syncTrackerTime();
-
-//       trackingRef.current =
-//         false;
-
-//       pausedRef.current =
-//         false;
-
-//       setIsTracking(
-//         false
-//       );
-
-//       setIsPaused(
-//         false
-//       );
-
-//       clearCaptureTimers();
-
-//       setNextCaptureInSec(
-//         null
-//       );
-
-//       if (
-//         screenStreamRef.current
-//       ) {
-//         screenStreamRef.current
-//           .getTracks()
-//           .forEach(
-//             (
-//               track
-//             ) =>
-//               track.stop()
-//           );
-
-//         screenStreamRef.current =
-//           null;
-//       }
-
-//       if (
-//         screenVideoRef.current
-//       ) {
-//         screenVideoRef.current.srcObject =
-//           null;
-//       }
-
-//       setSessionSeconds(
-//         0
-//       );
-
-//       restoredSessionRef.current = false;
-
-//       setLastStatus(
-//         `Tracking stopped. Today: ${formatSecondsToHoursMinutes(
-//           daySecondsRef.current
-//         )}`
-//       );
-
-//       await loadDateHistory();
-//     };
-
-//   // ====================================================
-//   // CLEANUP
-//   // ====================================================
-
-//   useEffect(() => {
-//     return () => {
-
-//       clearCaptureTimers();
-
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-//       }
-
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
-
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
-
-//       if (
-//         screenStreamRef.current
-//       ) {
-//         screenStreamRef.current
-//           .getTracks()
-//           .forEach(
-//             (
-//               track
-//             ) =>
-//               track.stop()
-//           );
-//       }
-//     };
-//   }, []);
-
-//   // ====================================================
-//   // UI HELPERS
-//   // ====================================================
-
-//   const policyText =
-//     `${screenshotsPerWindow} screenshot${
-//       screenshotsPerWindow ===
-//       1
-//         ? ''
-//         : 's'
-//     } randomly / ${
-//       captureWindowSeconds <
-//       60
-//         ? `${captureWindowSeconds} sec`
-//         : `${Math.round(
-//             captureWindowSeconds /
-//               60
-//           )} min`
-//     }`;
-
-//   const today =
-//     getTodayDateKey();
-
-//   // ====================================================
-//   // RENDER
-//   // ====================================================
-
-//   return (
-//     <div className="w-full max-w-7xl mx-auto space-y-6">
-
-//       {/* HEADER */}
-
-//       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-
-//         <div className="flex items-center gap-3">
-
-//           <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
-//             <Monitor className="w-6 h-6" />
-//           </div>
-
-//           <div>
-
-//             <h1 className="text-2xl font-bold">
-//               Employee Dashboard
-//             </h1>
-
-//             <div className="text-sm text-slate-500">
-//               {currentUser.name}
-//               {' • '}
-//               {currentUser.email}
-//             </div>
-
-//           </div>
-
-//         </div>
-
-//         {onLogout && (
-//           <button
-//             type="button"
-//             onClick={
-//               onLogout
-//             }
-//             className="cursor-pointer px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
-//           >
-//             Logout
-//           </button>
-//         )}
-
-//       </div>
-
-//       {/* TRACKING CARD */}
-
-//       <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/20 p-6 space-y-5">
-
-//         <div>
-
-//           <label className="text-xs uppercase font-bold text-slate-500">
-//             Currently Working On
-//           </label>
-
-//           <input
-//             type="text"
-//             value={
-//               taskName
-//             }
-//             onChange={(
-//               event
-//             ) =>
-//               setTaskName(
-//                 event.target
-//                   .value
-//               )
-//             }
-//             className="mt-2 w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-//           />
-
-//         </div>
-
-//         {/* POLICY */}
-
-//         <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-
-//           <div className="flex flex-wrap items-center gap-2">
-
-//             <Camera className="w-4 h-4 text-indigo-600" />
-
-//             <span className="text-xs font-bold">
-//               Live Admin Capture Policy:
-//             </span>
-
-//             <span className="text-sm font-black text-indigo-600">
-//               {policyText}
-//             </span>
-
-//             <span className="px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-//               AUTO SYNC
-//             </span>
-
-//           </div>
-
-//           <div className="mt-2 text-[11px] text-slate-500">
-
-//             {capturePresetId ===
-//             'custom'
-//               ? 'Custom policy selected by Admin.'
-//               : 'Preset policy selected by Admin.'}
-
-//             {centralPolicyUpdatedAt
-//               ? ` Last updated: ${new Date(
-//                   centralPolicyUpdatedAt
-//                 ).toLocaleTimeString()}`
-//               : ''}
-
-//           </div>
-
-//         </div>
-
-//         {/* BUTTONS */}
-
-//         <div className="flex flex-col sm:flex-row gap-3">
-
-//           {!isTracking ? (
-//             <button
-//               type="button"
-//               onClick={
-//                 startTracking
-//               }
-//               className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-//             >
-//               <Play className="w-4 h-4" />
-
-//               Start Tracking
-//             </button>
-//           ) : (
-//             <>
-//               {!isPaused ? (
-//                 <button
-//                   type="button"
-//                   onClick={
-//                     pauseTracking
-//                   }
-//                   className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold"
-//                 >
-//                   <Pause className="w-4 h-4" />
-
-//                   Pause
-//                 </button>
-//               ) : (
-//                 <button
-//                   type="button"
-//                   onClick={
-//                     resumeTracking
-//                   }
-//                   className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
-//                 >
-//                   <Play className="w-4 h-4" />
-
-//                   Resume
-//                 </button>
-//               )}
-
-//               <button
-//                 type="button"
-//                 onClick={
-//                   stopTracking
-//                 }
-//                 className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
-//               >
-//                 <Square className="w-4 h-4" />
-
-//                 Stop
-//               </button>
-//             </>
-//           )}
-
-//         </div>
-
-//         {/* CAPTURE COUNTDOWN */}
-
-//         {isTracking &&
-//           !isPaused &&
-//           nextCaptureInSec !==
-//             null && (
-//           <div className="text-xs text-center font-semibold text-slate-600 dark:text-slate-300">
-
-//             Next random screenshot in approximately{' '}
-
-//             <span className="font-mono text-indigo-600">
-//               {nextCaptureInSec}s
-//             </span>
-
-//           </div>
-//         )}
-
-//       </div>
-
-//       {/* SUMMARY */}
-
-//       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-//           <div className="text-[11px] uppercase font-bold text-slate-500">
-//             Current Task Duration
-//           </div>
-
-//           <div className="text-2xl font-black mt-2">
-//             {formatSecondsToHoursMinutes(
-//               sessionSeconds
-//             )}
-//           </div>
-
-//         </div>
-
-//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-//           <div className="text-[11px] uppercase font-bold text-slate-500">
-//             Today Total Tracked
-//           </div>
-
-//           <div className="text-2xl font-black mt-2 text-emerald-600">
-//             {formatSecondsToHoursMinutes(
-//               dayTotalSeconds
-//             )}
-//           </div>
-
-//         </div>
-
-//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-//           <div className="text-[11px] uppercase font-bold text-slate-500">
-//             Selected Date Screenshots
-//           </div>
-
-//           <div className="text-2xl font-black mt-2 text-indigo-600">
-//             {selectedDateScreenshotCount}
-//           </div>
-
-//         </div>
-
-//       </div>
-
-//       {/* STATUS */}
-
-//       <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 flex items-start gap-2">
-
-//         {lastStatus.startsWith(
-//           '✅'
-//         ) ? (
-//           <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />
-//         ) : (
-//           <AlertCircle className="w-4 h-4 mt-0.5 text-indigo-600 shrink-0" />
-//         )}
-
-//         <div className="text-xs">
-
-//           {lastStatus}
-
-//           {lastCapturedTime && (
-//             <div className="text-slate-500 mt-1">
-//               Last screenshot:{' '}
-//               {lastCapturedTime}
-//             </div>
-//           )}
-
-//         </div>
-
-//       </div>
-
-//       {/* DATE HISTORY */}
-
-//       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-
-//         <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-
-//           <div>
-
-//             <h2 className="font-bold flex items-center gap-2">
-
-//               <Calendar className="w-5 h-5 text-indigo-600" />
-
-//               My Date-wise Work History
-
-//             </h2>
-
-//             <p className="text-xs text-slate-500 mt-1">
-//               Select a date to view actual tracked time and central screenshots.
-//             </p>
-
-//           </div>
-
-//           <div className="flex items-center gap-2">
-
-//             <input
-//               type="date"
-//               value={
-//                 selectedDate
-//               }
-//               max={
-//                 today
-//               }
-//               onChange={(
-//                 event
-//               ) =>
-//                 setSelectedDate(
-//                   event.target
-//                     .value ||
-//                     today
-//                 )
-//               }
-//               className="px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-//             />
-
-//             <button
-//               type="button"
-//               onClick={
-//                 loadDateHistory
-//               }
-//               className="cursor-pointer p-2 rounded-lg border border-slate-300 dark:border-slate-700"
-//               title="Refresh"
-//             >
-//               <RefreshCw className="w-4 h-4" />
-//             </button>
-
-//           </div>
-
-//         </div>
-
-//         <div className="p-5 space-y-5">
-
-//           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-
-//             <div className="rounded-xl p-4 bg-slate-50 dark:bg-slate-800">
-
-//               <div className="text-[11px] uppercase font-bold text-slate-500">
-//                 Selected Date
-//               </div>
-
-//               <div className="font-bold mt-1">
-//                 {selectedDate}
-//               </div>
-
-//             </div>
-
-//             <div className="rounded-xl p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-
-//               <div className="text-[11px] uppercase font-bold text-slate-500">
-//                 Actual Tracked Time
-//               </div>
-
-//               <div className="text-xl font-black mt-1 text-emerald-600">
-//                 {loadingHistory
-//                   ? 'Loading...'
-//                   : formatSecondsToHoursMinutes(
-//                       selectedDateSeconds
-//                     )}
-//               </div>
-
-//             </div>
-
-//             <div className="rounded-xl p-4 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
-
-//               <div className="text-[11px] uppercase font-bold text-slate-500">
-//                 Screenshots
-//               </div>
-
-//               <div className="text-xl font-black mt-1 text-indigo-600">
-//                 {loadingHistory
-//                   ? '...'
-//                   : selectedDateScreenshotCount}
-//               </div>
-
-//             </div>
-
-//           </div>
-
-//           {/* YEAR > MONTH > DATE HISTORY */}
-
-//           {activityHistory.length > 0 && (
-//             <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-
-//               <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-//                   Year
-//                 </div>
-
-//                 <div className="flex flex-wrap gap-2">
-//                   {historyYears.map((year) => (
-//                     <button
-//                       key={year}
-//                       type="button"
-//                       onClick={() => {
-//                         setSelectedHistoryYear(year);
-
-//                         const firstMonth = activityHistory
-//                           .filter((record) => record.dateKey.startsWith(`${year}-`))
-//                           .map((record) => record.dateKey.slice(0, 7))
-//                           .sort((a, b) => b.localeCompare(a))[0];
-
-//                         if (firstMonth) {
-//                           setSelectedHistoryMonth(firstMonth);
-//                         }
-//                       }}
-//                       className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
-//                         selectedHistoryYear === year
-//                           ? 'bg-indigo-600 text-white border-indigo-600'
-//                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
-//                       }`}
-//                     >
-//                       {year}
-//                     </button>
-//                   ))}
-//                 </div>
-//               </div>
-
-//               <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-//                   Month
-//                 </div>
-
-//                 <div className="flex flex-wrap gap-2">
-//                   {historyMonths.map((month) => (
-//                     <button
-//                       key={month}
-//                       type="button"
-//                       onClick={() => setSelectedHistoryMonth(month)}
-//                       className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
-//                         selectedHistoryMonth === month
-//                           ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-400'
-//                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
-//                       }`}
-//                     >
-//                       {monthLabel(month)}
-//                     </button>
-//                   ))}
-//                 </div>
-//               </div>
-
-//               <div className="p-4">
-//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-//                   Dates
-//                 </div>
-
-//                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-//                   {filteredHistoryDates.map((record) => (
-//                     <button
-//                       key={record.dateKey}
-//                       type="button"
-//                       onClick={() => setSelectedDate(record.dateKey)}
-//                       className={`text-left rounded-xl border p-3 transition ${
-//                         selectedDate === record.dateKey
-//                           ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400'
-//                           : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400'
-//                       }`}
-//                     >
-//                       <div className="font-bold text-sm">
-//                         {new Date(`${record.dateKey}T00:00:00`).toLocaleDateString(
-//                           undefined,
-//                           { day: '2-digit', month: 'short', year: 'numeric' }
-//                         )}
-//                       </div>
-
-//                       <div className="text-[11px] text-slate-500 mt-1">
-//                         {formatSecondsToHoursMinutes(record.totalSeconds)}
-//                         {' • '}
-//                         {record.screenshotCount} screenshot{record.screenshotCount === 1 ? '' : 's'}
-//                       </div>
-//                     </button>
-//                   ))}
-//                 </div>
-//               </div>
-
-//             </div>
-//           )}
-
-//           {/* SCREENSHOTS */}
-
-//           <div>
-
-//             <div className="flex items-center justify-between gap-3 mb-4">
-
-//               <div>
-
-//                 <h3 className="font-bold flex items-center gap-2">
-
-//                   <Camera className="w-4 h-4 text-indigo-600" />
-
-//                   Screenshot History
-
-//                 </h3>
-
-//                 <div className="text-xs text-slate-500 mt-1">
-//                   {selectedDate}
-//                 </div>
-
-//               </div>
-
-//               <div className="text-xs font-bold text-indigo-600">
-//                 {
-//                   mergedScreenshots.length
-//                 }{' '}
-//                 captures
-//               </div>
-
-//             </div>
-
-//             {mergedScreenshots.length ===
-//             0 ? (
-//               <div className="py-14 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
-
-//                 <Camera className="w-10 h-10 mx-auto text-slate-400 mb-2" />
-
-//                 <div className="text-sm font-semibold">
-//                   No screenshots found
-//                 </div>
-
-//                 <div className="text-xs text-slate-500 mt-1">
-//                   No central screenshots are available for {selectedDate}.
-//                 </div>
-
-//               </div>
-//             ) : (
-//               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
-//                 {mergedScreenshots.map(
-//                   (
-//                     screenshot
-//                   ) => (
-//                     <button
-//                       key={
-//                         screenshot.id
-//                       }
-//                       type="button"
-//                       onClick={() =>
-//                         setPreviewModal(
-//                           screenshot
-//                         )
-//                       }
-//                       className="cursor-pointer text-left rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:border-indigo-400 transition"
-//                     >
-
-//                       {(() => {
-//                         const source =
-//                           screenshot.driveThumbnailLink ||
-//                           screenshot.previewDataUrl ||
-//                           '';
-
-//                         const displayUrl =
-//                           employeeScreenshotUrls[source] ||
-//                           (source.startsWith('data:') || source.startsWith('blob:')
-//                             ? source
-//                             : '');
-
-//                         return displayUrl ? (
-//                           <img
-//                             src={displayUrl}
-//                             alt="Screenshot"
-//                             className="w-full aspect-video object-cover bg-slate-950"
-//                           />
-//                         ) : (
-//                           <div className="w-full aspect-video bg-slate-950 flex items-center justify-center text-xs text-slate-400">
-//                             Loading screenshot...
-//                           </div>
-//                         );
-//                       })()}
-
-//                       <div className="p-3">
-
-//                         <div className="text-xs font-bold">
-//                           {
-//                             screenshot.taskName
-//                           }
-//                         </div>
-
-//                         <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-
-//                           <Clock className="w-3 h-3" />
-
-//                           {screenshot.timeFormatted ||
-//                             'Saved capture'}
-
-//                         </div>
-
-//                         {(() => {
-//                           const counts = (
-//                             screenshot as ScreenshotLog & {
-//                               activityCounts?: ScreenshotActivityCounts;
-//                             }
-//                           ).activityCounts;
-
-//                           if (!counts) return null;
-
-//                           return (
-//                             <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
-//                               <div className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">
-//                                 <div className="font-semibold">Mouse moves</div>
-//                                 <div>{counts.mouseMoves}</div>
-//                               </div>
-//                               <div className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">
-//                                 <div className="font-semibold">Clicks</div>
-//                                 <div>{counts.mouseClicks}</div>
-//                               </div>
-//                               <div className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">
-//                                 <div className="font-semibold">Key presses</div>
-//                                 <div>{counts.keyPresses}</div>
-//                               </div>
-//                             </div>
-//                           );
-//                         })()}
-
-//                       </div>
-
-//                     </button>
-//                   )
-//                 )}
-
-//               </div>
-//             )}
-
-//           </div>
-
-//         </div>
-
-//       </div>
-
-//       {/* PREVIEW */}
-
-//       {previewModal && (
-//         <div
-//           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-//           onClick={() =>
-//             setPreviewModal(
-//               null
-//             )
-//           }
-//         >
-
-//           <div
-//             className="w-full max-w-6xl"
-//             onClick={(
-//               event
-//             ) =>
-//               event.stopPropagation()
-//             }
-//           >
-
-//             <div className="flex justify-end mb-2">
-
-//               <button
-//                 type="button"
-//                 onClick={() =>
-//                   setPreviewModal(
-//                     null
-//                   )
-//                 }
-//                 className="cursor-pointer p-2 text-white"
-//               >
-//                 <X className="w-6 h-6" />
-//               </button>
-
-//             </div>
-
-//             <div className="bg-white dark:bg-slate-900 rounded-xl overflow-hidden">
-
-//               {(() => {
-//                 const source =
-//                   previewModal.driveThumbnailLink ||
-//                   previewModal.previewDataUrl ||
-//                   '';
-
-//                 const displayUrl =
-//                   employeeScreenshotUrls[source] ||
-//                   (source.startsWith('data:') || source.startsWith('blob:')
-//                     ? source
-//                     : '');
-
-//                 return displayUrl ? (
-//                   <img
-//                     src={displayUrl}
-//                     alt="Screenshot preview"
-//                     className="w-full max-h-[80vh] object-contain bg-slate-950"
-//                   />
-//                 ) : (
-//                   <div className="min-h-[320px] flex items-center justify-center bg-slate-950 text-slate-400">
-//                     Loading screenshot...
-//                   </div>
-//                 );
-//               })()}
-
-//               <div className="p-4">
-
-//                 <div className="font-bold">
-//                   {
-//                     previewModal.taskName
-//                   }
-//                 </div>
-
-//                 <div className="text-xs text-slate-500 mt-1">
-//                   {
-//                     previewModal.timeFormatted
-//                   }
-//                 </div>
-
-//               </div>
-
-//             </div>
-
-//           </div>
-
-//         </div>
-//       )}
-
-//       {/* HIDDEN VIDEO */}
-
-//       <video
-//         ref={
-//           screenVideoRef
-//         }
-//         autoPlay
-//         muted
-//         playsInline
-//         className="fixed -top-[9999px] -left-[9999px] w-[320px] h-[180px] opacity-[0.001] pointer-events-none"
-//       />
-
-//     </div>
-//   );
-// };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// WORKING but only Timer tab
-
-// import React, {
-//   useEffect,
-//   useMemo,
-//   useRef,
-//   useState,
-// } from 'react';
-
-// import {
-//   AppUser,
-//   ScreenshotLog,
-//   StorageSettings,
-// } from '../types';
-
-// import {
-//   Play,
-//   Pause,
-//   Square,
-//   Camera,
-//   Calendar,
-//   Clock,
-//   Monitor,
-//   RefreshCw,
-//   AlertCircle,
-//   X,
-//   CheckCircle2,
-// } from 'lucide-react';
-
-// import {
-//   canvasToBlob,
-//   formatSecondsToHoursMinutes,
-//   formatTimeString,
-//   generateThumbnailDataUrl,
-//   getHourSlotKey,
-//   getTodayDateKey,
-// } from '../lib/utils';
-
-// import {
-//   getLocalScreenshots,
-//   startScreenshotUploadScheduler,
-//   uploadScreenshotLocally,
-// } from '../lib/localStorageService';
-
-// import {
-//   setCachedScreenshot,
-// } from '../lib/screenshotCache';
-
-// import {
-//   ScreenshotViewerImage,
-// } from './ScreenshotViewerImage';
-
-// // ======================================================
-// // BACKEND
-// // ======================================================
-
-// const getBackendUrl = (): string => {
-//   const configured =
-//     import.meta.env.VITE_BACKEND_URL?.trim();
-
-//   if (configured) {
-//     return configured.replace(/\/$/, '');
-//   }
-
-//   return 'https://codesdot-workmonitor.work-nest.workers.dev';
-// };
-
-// // ====================================================
-// // SCREENSHOT CLOUD UPLOAD WINDOW
-// // ====================================================
-
-// const INDIA_TIME_ZONE = 'Asia/Kolkata';
-// const TRACKING_START_MINUTES = 8 * 60 + 30;
-// const TRACKING_END_MINUTES = 20 * 60 + 30;
-
-// const getIndiaMinutes = (date = new Date()) => {
-//   const parts = new Intl.DateTimeFormat('en-IN', {
-//     timeZone: INDIA_TIME_ZONE,
-//     hour: '2-digit',
-//     minute: '2-digit',
-//     hourCycle: 'h23',
-//   }).formatToParts(date);
-//   const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
-//   const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
-//   return hour * 60 + minute;
-// };
-
-// const isScreenshotUploadWindowOpen = (date = new Date()) => {
-//   const minutes = getIndiaMinutes(date);
-//   return minutes >= TRACKING_START_MINUTES && minutes <= TRACKING_END_MINUTES;
-// };
-
-// // ======================================================
-// // SAFE JSON
-// // ======================================================
-
-// const readApiJson = async (
-//   response: Response
-// ) => {
-//   const contentType =
-//     response.headers.get(
-//       'content-type'
-//     ) || '';
-
-//   const raw =
-//     await response.text();
-
-//   if (
-//     !contentType.includes(
-//       'application/json'
-//     )
-//   ) {
-//     console.warn(
-//       'Backend returned non-JSON:',
-//       raw.slice(0, 150)
-//     );
-
-//     throw new Error(
-//       response.status === 429
-//         ? 'Backend is rate-limited (429). Please wait a moment and retry.'
-//         : `Backend returned non-JSON response (${response.status}).`
-//     );
-//   }
-
-//   try {
-//     return raw
-//       ? JSON.parse(raw)
-//       : {};
-//   } catch {
-//     throw new Error(
-//       'Backend returned invalid JSON.'
-//     );
-//   }
-// };
-
-// // ======================================================
-// // TYPES
-// // ======================================================
-
-// interface ScreenshotActivityCounts {
-//   mouseMoves: number;
-//   mouseClicks: number;
-//   keyPresses: number;
+//   activityPercent?: number;
+//   activeSeconds?: number;
+//   trackedSeconds?: number;
 // }
 
 // const getActivityStorageKey = (
@@ -6510,6 +206,12 @@
 //       mouseMoves: Math.max(0, Number(parsed?.mouseMoves) || 0),
 //       mouseClicks: Math.max(0, Number(parsed?.mouseClicks) || 0),
 //       keyPresses: Math.max(0, Number(parsed?.keyPresses) || 0),
+//       activityPercent: Math.min(
+//         100,
+//         Math.max(0, Number(parsed?.activityPercent) || 0)
+//       ),
+//       activeSeconds: Math.max(0, Number(parsed?.activeSeconds) || 0),
+//       trackedSeconds: Math.max(0, Number(parsed?.trackedSeconds) || 0),
 //     };
 //   } catch {
 //     return undefined;
@@ -6616,6 +318,16 @@
 //     useState(false);
 
 //   const [
+//     showReconnectModal,
+//     setShowReconnectModal,
+//   ] = useState(false);
+
+//   const [
+//     reconnecting,
+//     setReconnecting,
+//   ] = useState(false);
+
+//   const [
 //     sessionSeconds,
 //     setSessionSeconds,
 //   ] =
@@ -6739,7 +451,6 @@
 //     useState<
 //       ScreenshotLog | null
 //     >(null);
-
 
 //   // ====================================================
 //   // YEAR / MONTH HISTORY NAVIGATION
@@ -6848,7 +559,7 @@
 //       number | null
 //     >(null);
 
-//   // Central D1 tracker sync runs only once per minute while actively tracking.
+//   // Kept only so the cleanup effect below stays valid.
 //   const trackerSyncIntervalRef =
 //     useRef<
 //       number | null
@@ -6862,6 +573,26 @@
 
 //   const daySecondsRef =
 //     useRef(0);
+
+//   // ---- Timestamp based timer (single source of truth) ----
+//   // elapsed = base seconds (saved) + (Date.now() - segment start)
+//   const sessionSecondsRef =
+//     useRef(0);
+
+//   const baseDayRef =
+//     useRef(0);
+
+//   const baseSessionRef =
+//     useRef(0);
+
+//   const segmentStartRef =
+//     useRef<number | null>(null);
+
+//   // True once the page is being unloaded/refreshed. The browser may end the
+//   // screen-share track during unload; that must not clear the "was tracking"
+//   // marker that drives the reconnect popup.
+//   const unloadingRef =
+//     useRef(false);
 
 //   // When a tracking session survives a page refresh, keep the saved
 //   // session duration so the next Start action resumes it instead of
@@ -6901,11 +632,10 @@
 //   ]);
 
 //   useEffect(() => {
-//     daySecondsRef.current =
-//       dayTotalSeconds;
-//   }, [
-//     dayTotalSeconds,
-//   ]);
+//     if (dayTotalSeconds > daySecondsRef.current) {
+//       daySecondsRef.current = dayTotalSeconds;
+//     }
+//   }, [dayTotalSeconds]);
 
 //   useEffect(() => {
 //     captureWindowRef.current =
@@ -6955,93 +685,93 @@
 //     `${currentUser.id}_` +
 //     `${getTodayDateKey()}`;
 
-//   // Restore browser timer
+//   // Separate marker: was tracking active (running/paused) when the page closed?
+//   // Stored apart from the timer data so the timer save effect cannot overwrite it.
+//   const sessionFlagKey =
+//     `wm_emp_active_` +
+//     `${currentUser.id}_` +
+//     `${getTodayDateKey()}`;
+
+//   const setSessionFlag = (
+//     value: 'running' | 'paused' | null
+//   ) => {
+//     try {
+//       if (value) {
+//         localStorage.setItem(sessionFlagKey, value);
+//       } else {
+//         localStorage.removeItem(sessionFlagKey);
+//       }
+//     } catch {
+//       // ignore
+//     }
+//   };
+
+//   // Restore browser timer (state AND refs)
 //   useEffect(() => {
 //     try {
-//       const raw =
-//         localStorage.getItem(
-//           timerStorageKey
-//         );
+//       const raw = localStorage.getItem(timerStorageKey);
+//       if (!raw) return;
 
-//       if (!raw) {
-//         return;
+//       const saved = JSON.parse(raw);
+//       const savedDay = Math.max(0, Number(saved?.dayTotalSeconds) || 0);
+//       const savedSession = Math.max(0, Number(saved?.sessionSeconds) || 0);
+
+//       if (savedDay > daySecondsRef.current) {
+//         daySecondsRef.current = savedDay;
+//         setDayTotalSeconds(savedDay);
 //       }
 
-//       const saved =
-//         JSON.parse(raw);
+//       sessionSecondsRef.current = savedSession;
+//       setSessionSeconds(savedSession);
 
-//       if (
-//         typeof saved
-//           ?.dayTotalSeconds ===
-//         'number'
-//       ) {
-//         setDayTotalSeconds(
-//           Math.max(
-//             0,
-//             saved
-//               .dayTotalSeconds
-//           )
+//       if (savedSession > 0) {
+//         restoredSessionRef.current = true;
+//         setLastStatus(
+//           'Previous tracking time restored. Click Start Tracking to continue.'
 //         );
 //       }
 
-//       if (
-//         typeof saved
-//           ?.sessionSeconds ===
-//         'number'
-//       ) {
-//         const restoredSessionSeconds = Math.max(
-//           0,
-//           saved.sessionSeconds
-//         );
-
-//         setSessionSeconds(
-//           restoredSessionSeconds
-//         );
-
-//         if (
-//           saved?.isTracking &&
-//           restoredSessionSeconds > 0
-//         ) {
-//           restoredSessionRef.current = true;
-//           setLastStatus(
-//             'Previous tracking time restored. Click Start Tracking to continue.'
-//           );
-//         }
+//       if (saved?.taskName) {
+//         setTaskName(saved.taskName);
 //       }
-
-//       if (
-//         saved?.taskName
-//       ) {
-//         setTaskName(
-//           saved.taskName
-//         );
-//       }
-//     } catch (
-//       error
-//     ) {
-//       console.warn(
-//         'Timer restore warning:',
-//         error
-//       );
+//     } catch (error) {
+//       console.warn('Timer restore warning:', error);
 //     }
-//   }, [
-//     timerStorageKey,
-//   ]);
+//   }, [timerStorageKey]);
+
+//   // Page refreshed while tracking was running -> ask to reconnect screen sharing.
+//   // (Declared after the restore effect so its status message wins.)
+//   useEffect(() => {
+//     try {
+//       if (localStorage.getItem(sessionFlagKey) !== 'running') return;
+
+//       restoredSessionRef.current = true;
+//       setShowReconnectModal(true);
+//       setLastStatus(
+//         'Page refreshed. Timer paused. Reconnect screen sharing to resume tracking and screenshots.'
+//       );
+//     } catch {
+//       // ignore
+//     }
+//   }, [sessionFlagKey]);
 
 //   // Save timer
 //   useEffect(() => {
+//     // Never overwrite saved time with the initial zeros on mount.
+//     if (!isTracking && dayTotalSeconds === 0 && sessionSeconds === 0) {
+//       return;
+//     }
+
 //     try {
 //       localStorage.setItem(
 //         timerStorageKey,
-
 //         JSON.stringify({
 //           dayTotalSeconds,
 //           sessionSeconds,
 //           taskName,
 //           isTracking,
 //           isPaused,
-//           updatedAt:
-//             Date.now(),
+//           updatedAt: Date.now(),
 //         })
 //       );
 //     } catch {
@@ -7133,121 +863,215 @@
 //     };
 
 //   // ====================================================
-//   // TIMER
+//   // TIMER (single source of truth: timestamps)
 //   // ====================================================
 
-//   useEffect(() => {
-//     if (
-//       isTracking &&
-//       !isPaused
-//     ) {
-//       trackerTimerRef.current =
-//         window.setInterval(
-//           () => {
-//             setSessionSeconds(
-//               (
-//                 previous
-//               ) =>
-//                 previous +
-//                 1
-//             );
-
-//             setDayTotalSeconds(
-//               (
-//                 previous
-//               ) =>
-//                 previous +
-//                 1
-//             );
-//           },
-//           1000
-//         );
-//     } else {
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-
-//         trackerTimerRef.current =
-//           null;
-//       }
+//   const readClock = () => {
+//     if (segmentStartRef.current === null) {
+//       return {
+//         day: daySecondsRef.current,
+//         session: sessionSecondsRef.current,
+//       };
 //     }
 
-//     return () => {
-//       if (
-//         trackerTimerRef.current
-//       ) {
-//         clearInterval(
-//           trackerTimerRef.current
-//         );
-//       }
+//     const delta = Math.max(
+//       0,
+//       Math.floor((Date.now() - segmentStartRef.current) / 1000)
+//     );
+
+//     return {
+//       day: baseDayRef.current + delta,
+//       session: baseSessionRef.current + delta,
 //     };
-//   }, [
-//     isTracking,
-//     isPaused,
-//   ]);
+//   };
 
-//   // ====================================================
-//   // PERIODIC CENTRAL TRACKER SYNC
-//   // ====================================================
-//   // Keep Cloudflare D1 updated while the employee is working.
-//   // This runs once every 60 seconds only while actively tracking.
-//   // It does not poll while paused or stopped.
+//   const applyClock = () => {
+//     const { day, session } = readClock();
 
+//     daySecondsRef.current = day;
+//     sessionSecondsRef.current = session;
+
+//     setDayTotalSeconds(day);
+//     setSessionSeconds(session);
+
+//     return day;
+//   };
+
+//   const beginSegment = () => {
+//     baseDayRef.current = daySecondsRef.current;
+//     baseSessionRef.current = sessionSecondsRef.current;
+//     segmentStartRef.current = Date.now();
+//   };
+
+//   const endSegment = () => {
+//     const day = applyClock();
+//     segmentStartRef.current = null;
+//     return day;
+//   };
+
+//   // UI tick (display only; elapsed is always computed from timestamps)
 //   useEffect(() => {
-//     if (
-//       !isTracking ||
-//       isPaused
-//     ) {
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
+//     if (!isTracking || isPaused) return;
 
-//         trackerSyncIntervalRef.current =
-//           null;
-//       }
+//     const id = window.setInterval(applyClock, 1000);
 
-//       return;
-//     }
+//     const onVisible = () => {
+//       if (document.visibilityState === 'visible') applyClock();
+//     };
 
-//     // The Start action already performs the initial sync.
-//     // The interval handles subsequent updates.
-//     trackerSyncIntervalRef.current =
-//       window.setInterval(
-//         () => {
-//           if (
-//             trackingRef.current &&
-//             !pausedRef.current
-//           ) {
-//             void syncTrackerTime(
-//               daySecondsRef.current
-//             );
-//           }
-//         },
-//         60 * 1000
-//       );
+//     document.addEventListener('visibilitychange', onVisible);
 
 //     return () => {
-//       if (
-//         trackerSyncIntervalRef.current !== null
-//       ) {
-//         window.clearInterval(
-//           trackerSyncIntervalRef.current
-//         );
+//       window.clearInterval(id);
+//       document.removeEventListener('visibilitychange', onVisible);
+//     };
+//   }, [isTracking, isPaused]);
 
-//         trackerSyncIntervalRef.current =
-//           null;
+//   // Backend sync every 30 seconds while actively tracking
+//   useEffect(() => {
+//     if (!isTracking || isPaused) return;
+
+//     const id = window.setInterval(() => {
+//       if (trackingRef.current && !pausedRef.current) {
+//         void syncTrackerTime(readClock().day);
+//       }
+//     }, 30000);
+
+//     return () => window.clearInterval(id);
+//   }, [isTracking, isPaused]);
+
+//   // Best-effort sync when the page is reloaded/closed
+//   useEffect(() => {
+//     const onShow = () => {
+//       unloadingRef.current = false;
+//     };
+
+//     const onHide = () => {
+//       unloadingRef.current = true;
+
+//       if (!trackingRef.current) return;
+
+//       try {
+//         void fetch(`${backendUrl}/api/tracker-time`, {
+//           method: 'POST',
+//           keepalive: true,
+//           headers: { 'Content-Type': 'application/json' },
+//           body: JSON.stringify({
+//             employeeId: currentUser.id,
+//             employeeName: currentUser.name,
+//             dateKey: getTodayDateKey(),
+//             totalSeconds: readClock().day,
+//           }),
+//         });
+//       } catch {
+//         // ignore
 //       }
 //     };
-//   }, [
-//     isTracking,
-//     isPaused,
-//   ]);
+
+//     window.addEventListener('pagehide', onHide);
+//     window.addEventListener('pageshow', onShow);
+//     return () => {
+//       window.removeEventListener('pagehide', onHide);
+//       window.removeEventListener('pageshow', onShow);
+//     };
+//   }, [backendUrl, currentUser.id, currentUser.name]);
+
+//   // Reminders while the reconnect popup is open (every 60s, never overlapping):
+//   //  1) voice            - Chrome may block it until the page has had a click
+//   //  2) desktop notification - works when this tab/window is in the background
+//   //  3) tab title flash  - visible in the tab strip
+//   useEffect(() => {
+//     if (!showReconnectModal || isTracking) return;
+
+//     const originalTitle = document.title;
+//     let flashOn = false;
+//     let activeNotification: Notification | null = null;
+
+//     const speak = () => {
+//       try {
+//         if (!('speechSynthesis' in window)) return;
+
+//         const synth = window.speechSynthesis;
+
+//         // Avoid overlapping reminders.
+//         if (synth.speaking || synth.pending) return;
+
+//         const utterance = new SpeechSynthesisUtterance(
+//           RECONNECT_VOICE_MESSAGE
+//         );
+//         utterance.rate = 1;
+//         utterance.volume = 1;
+//         synth.speak(utterance);
+//       } catch {
+//         // Browser may block speech until the page has had a user interaction.
+//       }
+//     };
+
+//     const notify = () => {
+//       try {
+//         if (
+//           !('Notification' in window) ||
+//           Notification.permission !== 'granted'
+//         ) {
+//           return;
+//         }
+
+//         // Same tag replaces the previous alert, so they never pile up.
+//         activeNotification?.close();
+
+//         const notification = new Notification(RECONNECT_POPUP_TITLE, {
+//           body: RECONNECT_VOICE_MESSAGE,
+//           tag: 'wm-reconnect',
+//           requireInteraction: true,
+//           renotify: true,
+//         } as NotificationOptions & { renotify?: boolean });
+
+//         notification.onclick = () => {
+//           window.focus();
+//           notification.close();
+//         };
+
+//         activeNotification = notification;
+//       } catch {
+//         // ignore
+//       }
+//     };
+
+//     const remind = () => {
+//       speak();
+//       notify();
+//     };
+
+//     const reminderId = window.setInterval(remind, RECONNECT_REMINDER_MS);
+
+//     // Flash the tab title so the employee notices it from another tab.
+//     const flashId = window.setInterval(() => {
+//       flashOn = !flashOn;
+//       document.title = flashOn
+//         ? '⚠ Reconnect screen sharing'
+//         : originalTitle;
+//     }, 1000);
+
+//     return () => {
+//       window.clearInterval(reminderId);
+//       window.clearInterval(flashId);
+//       document.title = originalTitle;
+
+//       try {
+//         activeNotification?.close();
+//       } catch {
+//         // ignore
+//       }
+
+//       try {
+//         if ('speechSynthesis' in window) {
+//           window.speechSynthesis.cancel();
+//         }
+//       } catch {
+//         // ignore
+//       }
+//     };
+//   }, [showReconnectModal, isTracking]);
 
 //   // ====================================================
 //   // SCREEN SHARE
@@ -7353,6 +1177,19 @@
 //               setLastStatus(
 //                 'Screen sharing stopped. Start tracking again to continue.'
 //               );
+
+//               // Manual "Stop sharing" ends tracking. During a page refresh keep
+//               // the marker so the reconnect popup can appear after reload.
+//               if (!unloadingRef.current) {
+//                 setSessionFlag(null);
+//               }
+
+//               // Freeze the timer and save elapsed time before stopping.
+//               const finalSeconds = endSegment();
+//               void syncTrackerTime(finalSeconds);
+//               trackingRef.current = false;
+//               pausedRef.current = false;
+//               clearCaptureTimers();
 
 //               setIsTracking(
 //                 false
@@ -7580,11 +1417,22 @@
 
 //         // Freeze this screenshot's activity interval before awaiting uploads,
 //         // so events occurring during a slow upload belong to the next interval.
+//         // Snapshot global Windows input first. If the optional agent is not
+//         // running, counts fall back to zero.
+//         const globalCounts = await callGlobalActivityAgent('snapshot');
+
 //         const activityCounts: ScreenshotActivityCounts = {
-//           mouseMoves: Math.max(0, Number(activityCountsRef.current.mouseMoves) || 0),
-//           mouseClicks: Math.max(0, Number(activityCountsRef.current.mouseClicks) || 0),
-//           keyPresses: Math.max(0, Number(activityCountsRef.current.keyPresses) || 0),
+//           mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
+//           mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
+//           keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
+//           activityPercent: Math.min(
+//             100,
+//             Math.max(0, Number(globalCounts?.activityPercent) || 0)
+//           ),
+//           activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
+//           trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
 //         };
+
 //         activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
 //         lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
 
@@ -7678,7 +1526,11 @@
 //           log
 //         );
 
-//         // Persist counts in D1 so they survive refresh/logout and can be read
+//         // Keep Admin in sync after every screenshot. This only READS the
+//         // timer; it never changes timer state.
+//         void syncTrackerTime(readClock().day);
+
+//         // Persist counts so they survive refresh/logout and can be read
 //         // back for screenshot history. A count-save failure must not undo a screenshot.
 //         try {
 //           const response = await fetch(`${backendUrl}/api/activity-snapshot`, {
@@ -7693,6 +1545,8 @@
 //               mouseMoves: activityCounts.mouseMoves,
 //               mouseClicks: activityCounts.mouseClicks,
 //               keyPresses: activityCounts.keyPresses,
+//               activeSeconds: activityCounts.activeSeconds ?? 0,
+//               trackedSeconds: activityCounts.trackedSeconds ?? 0,
 //             }),
 //           });
 //           if (!response.ok) {
@@ -8168,15 +2022,9 @@
 //   // ====================================================
 
 //   useEffect(() => {
-//     const stopScheduler = startScreenshotUploadScheduler();
+//     const stopScheduler = startScreenshotUploadScheduler(currentUser.id);
 //     return stopScheduler;
 //   }, []);
-
-//   // ====================================================
-//   // GLOBAL POLICY
-//   // ====================================================
-//   // Capture policy is supplied by employee login and cached locally.
-//   // No background /api/capture-settings polling is performed.
 
 //   // ====================================================
 //   // HISTORY
@@ -8236,16 +2084,34 @@
 
 //         if (
 //           historyResponse.ok &&
-//           historyData
-//             ?.success
+//           historyData?.success
 //         ) {
-//           setActivityHistory(
-//             Array.isArray(
-//               historyData.records
-//             )
-//               ? historyData.records
-//               : []
+//           const records = Array.isArray(historyData.records)
+//             ? historyData.records
+//             : [];
+
+//           setActivityHistory(records);
+
+//           const todayKey = getTodayDateKey();
+
+//           const todayRecord = records.find(
+//             (record: ActivityHistoryRecord) =>
+//               record.dateKey === todayKey
 //           );
+
+//           const serverTodaySeconds = Math.max(
+//             0,
+//             Number(todayRecord?.totalSeconds) || 0
+//           );
+
+//           // If the server has more time than this browser, move the timer
+//           // forward (base + display) so the running clock does not undo it.
+//           if (serverTodaySeconds > daySecondsRef.current) {
+//             const diff = serverTodaySeconds - daySecondsRef.current;
+//             baseDayRef.current += diff;
+//             daySecondsRef.current = serverTodaySeconds;
+//             setDayTotalSeconds(serverTodaySeconds);
+//           }
 //         }
 
 //         if (
@@ -8431,8 +2297,17 @@
 //               const fileKey = String(screenshot.fileName || screenshot.driveFileId || '');
 //               const serverCounts = countsByFile.get(fileKey);
 //               if (serverCounts) {
-//                 screenshot.activityCounts = serverCounts;
-//                 saveActivityCounts(currentUser.id, selectedDate, fileKey, serverCounts);
+//                 const localCounts = screenshot.activityCounts;
+
+//                 const mergedCounts: ScreenshotActivityCounts = {
+//                   ...serverCounts,
+//                   activityPercent: localCounts?.activityPercent ?? 0,
+//                   activeSeconds: localCounts?.activeSeconds ?? 0,
+//                   trackedSeconds: localCounts?.trackedSeconds ?? 0,
+//                 };
+
+//                 screenshot.activityCounts = mergedCounts;
+//                 saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
 //               }
 //             }
 //           }
@@ -8565,6 +2440,14 @@
 //       selectedDate,
 //     ]);
 
+//   // ---- Screenshot pagination (client-side, filtered list only) ----
+//   const screenshotPagination = usePagination(
+//     mergedScreenshots,
+//     `${currentUser.id}|${selectedDate}`
+//   );
+//   const pagedScreenshots = screenshotPagination.pageItems;
+
+
 //   // ====================================================
 //   // YEAR / MONTH HISTORY GROUPS
 //   // ====================================================
@@ -8647,7 +2530,7 @@
 //       const loaded: Record<string, string> = {};
 //       const cache = employeeScreenshotUrlCacheRef.current;
 
-//       for (const screenshot of mergedScreenshots) {
+//       for (const screenshot of pagedScreenshots) {
 //         const source =
 //           screenshot.driveThumbnailLink ||
 //           screenshot.previewDataUrl ||
@@ -8710,7 +2593,7 @@
 //     return () => {
 //       cancelled = true;
 //     };
-//   }, [mergedScreenshots]);
+//   }, [pagedScreenshots]);
 
 //   // ====================================================
 //   // START
@@ -8726,11 +2609,30 @@
 //         return;
 //       }
 
+//       // Screen is shared (first start OR reconnect after refresh).
+//       setSessionFlag('running');
+//       setShowReconnectModal(false);
+
+//       // Ask once (non-blocking) so reconnect alerts can reach the employee
+//       // even when this tab is in the background.
+//       try {
+//         if (
+//           'Notification' in window &&
+//           Notification.permission === 'default'
+//         ) {
+//           void Notification.requestPermission();
+//         }
+//       } catch {
+//         // ignore
+//       }
+
 //       trackingRef.current =
 //         true;
 
 //       pausedRef.current =
 //         false;
+
+//       const globalAgentStarted = await callGlobalActivityAgent('start');
 
 //       setIsTracking(
 //         true
@@ -8743,11 +2645,17 @@
 //       if (restoredSessionRef.current) {
 //         restoredSessionRef.current = false;
 //       } else {
+//         sessionSecondsRef.current = 0;
 //         setSessionSeconds(0);
 //       }
 
+//       // Timer starts from saved accumulated seconds + this timestamp.
+//       beginSegment();
+
 //       setLastStatus(
-//         '✅ Tracking started'
+//         globalAgentStarted === null
+//           ? '✅ Tracking started. Browser-only activity counting: start the Windows activity agent for whole-device counts.'
+//           : '✅ Tracking started with Windows-wide activity counting.'
 //       );
 
 //       await syncTrackerTime();
@@ -8767,6 +2675,13 @@
 
 //       pausedRef.current =
 //         true;
+
+//       setSessionFlag('paused');
+
+//       // Freeze elapsed time.
+//       endSegment();
+
+//       await callGlobalActivityAgent('pause');
 
 //       setIsPaused(
 //         true
@@ -8790,10 +2705,16 @@
 //   // ====================================================
 
 //   const resumeTracking =
-//     () => {
-
+//     async () => {
 //       pausedRef.current =
 //         false;
+
+//       setSessionFlag('running');
+
+//       // Continue from the saved elapsed time.
+//       beginSegment();
+
+//       await callGlobalActivityAgent('resume');
 
 //       setIsPaused(
 //         false
@@ -8816,7 +2737,13 @@
 //   const stopTracking =
 //     async () => {
 
+//       // Freeze elapsed time first, then save it.
+//       endSegment();
+
+//       setSessionFlag(null);
+
 //       await syncTrackerTime();
+//       await callGlobalActivityAgent('stop');
 
 //       trackingRef.current =
 //         false;
@@ -8841,13 +2768,16 @@
 //       if (
 //         screenStreamRef.current
 //       ) {
+//         // Detach onended first so manual Stop does not run the handler.
 //         screenStreamRef.current
 //           .getTracks()
 //           .forEach(
 //             (
 //               track
-//             ) =>
-//               track.stop()
+//             ) => {
+//               track.onended = null;
+//               track.stop();
+//             }
 //           );
 
 //         screenStreamRef.current =
@@ -8860,6 +2790,8 @@
 //         screenVideoRef.current.srcObject =
 //           null;
 //       }
+
+//       sessionSecondsRef.current = 0;
 
 //       setSessionSeconds(
 //         0
@@ -8874,6 +2806,45 @@
 //       );
 
 //       await loadDateHistory();
+//     };
+
+//   // ====================================================
+//   // RECONNECT SCREEN SHARING (after refresh)
+//   // ====================================================
+
+//   // Reuses startTracking(): it opens the browser's screen chooser (must run
+//   // inside this click), restores the saved session/day seconds, restarts the
+//   // single timestamp timer, activity agent and screenshot schedule.
+//   const reconnectScreenSharing =
+//     async () => {
+//       if (reconnecting) return;
+
+//       setReconnecting(true);
+
+//       try {
+//         await startTracking();
+//       } finally {
+//         setReconnecting(false);
+//       }
+//     };
+
+//   // Employee chooses not to reconnect: keep saved time, stay stopped.
+//   const dismissReconnect =
+//     () => {
+//       setSessionFlag(null);
+//       setShowReconnectModal(false);
+
+//       setLastStatus(
+//         'Tracking stopped. Saved time is kept. Click Start Tracking to continue.'
+//       );
+
+//       void syncTrackerTime(daySecondsRef.current);
+//     };
+
+//   const handleLogout =
+//     () => {
+//       setSessionFlag(null);
+//       onLogout?.();
 //     };
 
 //   // ====================================================
@@ -8979,7 +2950,7 @@
 //           <button
 //             type="button"
 //             onClick={
-//               onLogout
+//               handleLogout
 //             }
 //             className="cursor-pointer px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
 //           >
@@ -9207,6 +3178,69 @@
 //         </div>
 
 //       </div>
+
+//       {/* TIME & ACTIVITY REPORT (own data only) */}
+//       <TimeActivityReport
+//         title="My time and activity report"
+//         fileName={`work-report_${currentUser.name.replace(/\s+/g, '_')}`}
+//         allowMemberSelect={false}
+//         members={[
+//           {
+//             id: currentUser.id,
+//             name: currentUser.name,
+//             email: currentUser.email,
+//           },
+//         ]}
+//         loadHistory={async () => {
+//           const res = await fetch(
+//             `${backendUrl}/api/activity-history/${encodeURIComponent(currentUser.id)}`,
+//             { cache: 'no-store', headers: backendHeaders }
+//           );
+
+//           const data = await readApiJson(res);
+
+//           if (!res.ok || !data?.success) {
+//             throw new Error(data?.error || 'Failed to load history');
+//           }
+
+//           const records: ActivityHistoryRecord[] = (
+//             Array.isArray(data.records) ? data.records : []
+//           ).map((r: ActivityHistoryRecord) => ({ ...r }));
+
+//           const ensure = (dateKey: string) => {
+//             let rec = records.find((r) => r.dateKey === dateKey);
+
+//             if (!rec) {
+//               rec = {
+//                 dateKey,
+//                 totalSeconds: 0,
+//                 screenshotCount: 0,
+//               };
+//               records.push(rec);
+//             }
+
+//             return rec;
+//           };
+
+//           if (dayTotalSeconds > 0) {
+//             const rec = ensure(getTodayDateKey());
+//             rec.totalSeconds = Math.max(
+//               rec.totalSeconds,
+//               dayTotalSeconds
+//             );
+//           }
+
+//           if (selectedDateScreenshotCount > 0) {
+//             const rec = ensure(selectedDate);
+//             rec.screenshotCount = Math.max(
+//               rec.screenshotCount,
+//               selectedDateScreenshotCount
+//             );
+//           }
+
+//           return records;
+//         }}
+//       />
 
 //       {/* DATE HISTORY */}
 
@@ -9463,7 +3497,7 @@
 //             ) : (
 //               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
-//                 {mergedScreenshots.map(
+//                 {pagedScreenshots.map(
 //                   (
 //                     screenshot
 //                   ) => (
@@ -9529,21 +3563,69 @@
 //                             }
 //                           ).activityCounts;
 
-//                           if (!counts) return null;
+//                           const activityPercent = Math.min(
+//                             100,
+//                             Math.max(0, Number(counts?.activityPercent) || 0)
+//                           );
+
+//                           const activityColor =
+//                             activityPercent === 0
+//                               ? 'bg-slate-400'
+//                               : activityPercent <= 25
+//                                 ? 'bg-red-500'
+//                                 : activityPercent <= 55
+//                                   ? 'bg-orange-500'
+//                                   : 'bg-green-500';
+
+//                           const activityTextColor =
+//                             activityPercent === 0
+//                               ? 'text-slate-500'
+//                               : activityPercent <= 25
+//                                 ? 'text-red-500'
+//                                 : activityPercent <= 55
+//                                   ? 'text-orange-500'
+//                                   : 'text-green-600';
 
 //                           return (
-//                             <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
-//                               <div className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">
-//                                 <div className="font-semibold">Mouse moves</div>
-//                                 <div>{counts.mouseMoves}</div>
+//                             <div className="mt-3">
+//                               <div className="mb-1 flex items-center justify-between">
+//                                 <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+//                                   Activity
+//                                 </span>
+//                                 <span className={`text-xs font-bold ${activityTextColor}`}>
+//                                   {activityPercent}%
+//                                 </span>
 //                               </div>
-//                               <div className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">
-//                                 <div className="font-semibold">Clicks</div>
-//                                 <div>{counts.mouseClicks}</div>
+
+//                               <div
+//                                 className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
+//                                 role="progressbar"
+//                                 aria-label="Screenshot activity"
+//                                 aria-valuemin={0}
+//                                 aria-valuemax={100}
+//                                 aria-valuenow={activityPercent}
+//                               >
+//                                 <div
+//                                   className={`h-full rounded-full transition-all duration-300 ${activityColor}`}
+//                                   style={{ width: `${activityPercent}%` }}
+//                                 />
 //                               </div>
-//                               <div className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1">
-//                                 <div className="font-semibold">Key presses</div>
-//                                 <div>{counts.keyPresses}</div>
+
+//                               <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
+//                                 <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+//                                   <div className="font-semibold">Mouse moves</div>
+//                                   <div>{counts?.mouseMoves ?? 0}</div>
+//                                 </div>
+
+//                                 <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+//                                   <div className="font-semibold">Clicks</div>
+//                                   <div>{counts?.mouseClicks ?? 0}</div>
+//                                 </div>
+
+//                                 <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+//                                   <div className="font-semibold">Key presses</div>
+//                                   <div>{counts?.keyPresses ?? 0}</div>
+//                                 </div>
 //                               </div>
 //                             </div>
 //                           );
@@ -9557,6 +3639,16 @@
 
 //               </div>
 //             )}
+
+          
+//             <PaginationControls
+//               page={screenshotPagination.page}
+//               totalPages={screenshotPagination.totalPages}
+//               totalItems={screenshotPagination.totalItems}
+//               firstItemNumber={screenshotPagination.firstItemNumber}
+//               lastItemNumber={screenshotPagination.lastItemNumber}
+//               onPageChange={screenshotPagination.setPage}
+//             />
 
 //           </div>
 
@@ -9651,6 +3743,62 @@
 //         </div>
 //       )}
 
+//       {/* RECONNECT SCREEN SHARING POPUP */}
+
+//       {showReconnectModal && !isTracking && (
+//         <div
+//           className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+//           role="dialog"
+//           aria-modal="true"
+//           aria-labelledby="wm-reconnect-title"
+//         >
+
+//           <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-center shadow-2xl">
+
+//             <div className="mx-auto w-14 h-14 rounded-full bg-indigo-100 dark:bg-indigo-950 flex items-center justify-center">
+//               <Monitor className="w-6 h-6 text-indigo-600" />
+//             </div>
+
+//             <h2
+//               id="wm-reconnect-title"
+//               className="mt-4 text-xl font-black"
+//             >
+//               {RECONNECT_POPUP_TITLE}
+//             </h2>
+
+//             <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+//               {RECONNECT_POPUP_MESSAGE}
+//             </p>
+
+//             <button
+//               type="button"
+//               onClick={reconnectScreenSharing}
+//               disabled={reconnecting}
+//               className="cursor-pointer mt-5 w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold"
+//             >
+//               <Monitor className="w-4 h-4" />
+
+//               Choose screen &amp; reconnect
+//             </button>
+
+//             <p className="mt-3 text-[11px] text-slate-500">
+//               Browser security requires you to click this button before the
+//               screen-sharing chooser can open.
+//             </p>
+
+//             <button
+//               type="button"
+//               onClick={dismissReconnect}
+//               className="cursor-pointer mt-3 text-[11px] text-slate-500 underline"
+//             >
+//               Stop for now (saved time is kept)
+//             </button>
+
+//           </div>
+
+//         </div>
+//       )}
+
 //       {/* HIDDEN VIDEO */}
 
 //       <video
@@ -9667,22 +3815,4025 @@
 //   );
 // };
 
+// --------------------------------------------------------------
+// import { TimeActivityReport } from './TimeActivityReport';
+// import { PaginationControls, usePagination } from './ScreenshotPagination';
+
+// import React, {
+//   useEffect,
+//   useMemo,
+//   useRef,
+//   useState,
+// } from 'react';
+
+// import {
+//   AppUser,
+//   ScreenshotLog,
+//   StorageSettings,
+// } from '../types';
+
+// import {
+//   Play,
+//   Pause,
+//   Square,
+//   Camera,
+//   Calendar,
+//   Clock,
+//   Monitor,
+//   RefreshCw,
+//   AlertCircle,
+//   X,
+//   CheckCircle2,
+// } from 'lucide-react';
+
+// import {
+//   canvasToBlob,
+//   formatSecondsToHoursMinutes,
+//   formatTimeString,
+//   generateThumbnailDataUrl,
+//   getHourSlotKey,
+//   getTodayDateKey,
+// } from '../lib/utils';
+
+// import {
+//   getLocalScreenshots,
+//   startScreenshotUploadScheduler,
+//   uploadScreenshotLocally,
+// } from '../lib/localStorageService';
+
+// import {
+//   setCachedScreenshot,
+// } from '../lib/screenshotCache';
+
+// import {
+//   ScreenshotViewerImage,
+// } from './ScreenshotViewerImage';
+
+// // ======================================================
+// // BACKEND
+// // ======================================================
+
+// // Optional local Windows agent. It counts global input events only while the
+// // employee's tracking session is active; it never records key names or typed text.
+// const GLOBAL_AGENT_URL = 'http://127.0.0.1:3210';
+
+// const callGlobalActivityAgent = async (
+//   action: 'start' | 'pause' | 'resume' | 'stop' | 'snapshot'
+// ): Promise<Partial<ScreenshotActivityCounts> | null> => {
+//   try {
+//     const response = await fetch(`${GLOBAL_AGENT_URL}/${action}`, {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({}),
+//       cache: 'no-store',
+//     });
+//     if (!response.ok) return null;
+//     const data = await response.json();
+//     return action === 'snapshot' ? (data?.counts || null) : data;
+//   } catch {
+//     return null;
+//   }
+// };
+
+// const getBackendUrl = (): string => {
+//   const configured =
+//     import.meta.env.VITE_BACKEND_URL?.trim();
+
+//   if (configured) {
+//     return configured.replace(/\/$/, '');
+//   }
+
+//   return 'https://codesdot-workmonitor.work-nest.workers.dev';
+// };
+
+// // ====================================================
+// // SCREEN SHARING RECONNECT (after page refresh / lock / sleep / interruption)
+// // ====================================================
+
+// const RECONNECT_POPUP_TITLE = 'Reconnect screen sharing';
+
+// // Shown after an accidental page refresh. The timer is paused until reconnect.
+// const RECONNECT_POPUP_MESSAGE =
+//   "Your timer is paused and screenshots are stopped until you share your screen again. Your saved time is kept. Click below, then choose the screen in your browser's sharing window.";
+
+// // Shown when the desktop was locked / the computer slept / screen sharing stopped.
+// const RECONNECT_INTERRUPTED_MESSAGE =
+//   'Your desktop was locked or screen sharing was interrupted. Please reconnect your screen to resume tracking.';
+
+// const RECONNECT_VOICE_MESSAGE =
+//   'Please reconnect your screen sharing to continue tracking.';
+
+// const RECONNECT_REMINDER_MS = 60 * 1000;
+
+// // If the page's 1-second heartbeat has not run for this long, the computer was
+// // asleep / the page was suspended. Must stay ABOVE browser background-timer
+// // throttling (~60 s) so ordinary tab switching never causes a false pause.
+// const HEARTBEAT_GAP_MS = 120 * 1000;
+
+// // A capture track must stay muted this long before it is treated as unavailable.
+// const MUTE_GRACE_MS = 30 * 1000;
+
+// // ====================================================
+// // SCREENSHOT CLOUD UPLOAD WINDOW
+// // ====================================================
+
+// const INDIA_TIME_ZONE = 'Asia/Kolkata';
+// const TRACKING_START_MINUTES = 8 * 60 + 30;
+// const TRACKING_END_MINUTES = 20 * 60 + 30;
+
+// const getIndiaMinutes = (date = new Date()) => {
+//   const parts = new Intl.DateTimeFormat('en-IN', {
+//     timeZone: INDIA_TIME_ZONE,
+//     hour: '2-digit',
+//     minute: '2-digit',
+//     hourCycle: 'h23',
+//   }).formatToParts(date);
+//   const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
+//   const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
+//   return hour * 60 + minute;
+// };
+
+// const isScreenshotUploadWindowOpen = (date = new Date()) => {
+//   const minutes = getIndiaMinutes(date);
+//   return minutes >= TRACKING_START_MINUTES && minutes <= TRACKING_END_MINUTES;
+// };
+
+// // ======================================================
+// // SAFE JSON
+// // ======================================================
+
+// const readApiJson = async (
+//   response: Response
+// ) => {
+//   const contentType =
+//     response.headers.get(
+//       'content-type'
+//     ) || '';
+
+//   const raw =
+//     await response.text();
+
+//   if (
+//     !contentType.includes(
+//       'application/json'
+//     )
+//   ) {
+//     console.warn(
+//       'Backend returned non-JSON:',
+//       raw.slice(0, 150)
+//     );
+
+//     throw new Error(
+//       response.status === 429
+//         ? 'Backend is rate-limited (429). Please wait a moment and retry.'
+//         : `Backend returned non-JSON response (${response.status}).`
+//     );
+//   }
+
+//   try {
+//     return raw
+//       ? JSON.parse(raw)
+//       : {};
+//   } catch {
+//     throw new Error(
+//       'Backend returned invalid JSON.'
+//     );
+//   }
+// };
+
+// // ======================================================
+// // TYPES
+// // ======================================================
+
+// interface ScreenshotActivityCounts {
+//   mouseMoves: number;
+//   mouseClicks: number;
+//   keyPresses: number;
+//   activityPercent?: number;
+//   activeSeconds?: number;
+//   trackedSeconds?: number;
+// }
+
+// const getActivityStorageKey = (
+//   employeeId: string,
+//   dateKey: string,
+//   fileName: string
+// ) =>
+//   `wm_screenshot_activity_${employeeId}_${dateKey}_${fileName}`;
+
+// const readSavedActivityCounts = (
+//   employeeId: string,
+//   dateKey: string,
+//   fileName: string
+// ): ScreenshotActivityCounts | undefined => {
+//   try {
+//     const raw = localStorage.getItem(
+//       getActivityStorageKey(employeeId, dateKey, fileName)
+//     );
+//     if (!raw) return undefined;
+
+//     const parsed = JSON.parse(raw);
+//     return {
+//       mouseMoves: Math.max(0, Number(parsed?.mouseMoves) || 0),
+//       mouseClicks: Math.max(0, Number(parsed?.mouseClicks) || 0),
+//       keyPresses: Math.max(0, Number(parsed?.keyPresses) || 0),
+//       activityPercent: Math.min(
+//         100,
+//         Math.max(0, Number(parsed?.activityPercent) || 0)
+//       ),
+//       activeSeconds: Math.max(0, Number(parsed?.activeSeconds) || 0),
+//       trackedSeconds: Math.max(0, Number(parsed?.trackedSeconds) || 0),
+//     };
+//   } catch {
+//     return undefined;
+//   }
+// };
+
+// const saveActivityCounts = (
+//   employeeId: string,
+//   dateKey: string,
+//   fileName: string,
+//   counts: ScreenshotActivityCounts
+// ) => {
+//   try {
+//     localStorage.setItem(
+//       getActivityStorageKey(employeeId, dateKey, fileName),
+//       JSON.stringify(counts)
+//     );
+//   } catch (error) {
+//     console.warn("Could not persist screenshot activity counts locally:", error);
+//   }
+// };
+
+// interface ActivityHistoryRecord {
+//   dateKey: string;
+//   totalSeconds: number;
+//   screenshotCount: number;
+// }
+
+// interface EmployeeDashboardProps {
+//   currentUser: AppUser;
+
+//   storageSettings:
+//     StorageSettings;
+
+//   accessToken:
+//     string | null;
+
+//   onConnectDrive:
+//     () => void;
+
+//   onNewScreenshot:
+//     (
+//       log: ScreenshotLog
+//     ) => void;
+
+//   userScreenshots:
+//     ScreenshotLog[];
+
+//   onLogout?:
+//     () => void;
+// }
+
+// // ======================================================
+// // COMPONENT
+// // ======================================================
+
+// export const EmployeeDashboard:
+//   React.FC<
+//     EmployeeDashboardProps
+//   > = ({
+//     currentUser,
+//     storageSettings,
+//     onNewScreenshot,
+//     userScreenshots,
+//     onLogout,
+//   }) => {
+
+//   const backendUrl =
+//     useMemo(
+//       () =>
+//         getBackendUrl(),
+//       []
+//     );
+
+//   const backendHeaders =
+//     useMemo(
+//       () => ({
+//       }),
+//       []
+//     );
+
+//   // ====================================================
+//   // TRACKER
+//   // ====================================================
+
+//   const [
+//     taskName,
+//     setTaskName,
+//   ] =
+//     useState(
+//       'Product Design & Implementation'
+//     );
+
+//   const [
+//     isTracking,
+//     setIsTracking,
+//   ] =
+//     useState(false);
+
+//   const [
+//     isPaused,
+//     setIsPaused,
+//   ] =
+//     useState(false);
+
+//   const [
+//     showReconnectModal,
+//     setShowReconnectModal,
+//   ] = useState(false);
+
+//   const [
+//     reconnecting,
+//     setReconnecting,
+//   ] = useState(false);
+
+//   // Message shown in the (existing) reconnect popup.
+//   const [
+//     reconnectMessage,
+//     setReconnectMessage,
+//   ] = useState(RECONNECT_POPUP_MESSAGE);
+
+//   const [
+//     sessionSeconds,
+//     setSessionSeconds,
+//   ] =
+//     useState(0);
+
+//   const [
+//     dayTotalSeconds,
+//     setDayTotalSeconds,
+//   ] =
+//     useState(0);
+
+//   const [
+//     lastStatus,
+//     setLastStatus,
+//   ] =
+//     useState(
+//       'Ready to start tracking'
+//     );
+
+//   const [
+//     nextCaptureInSec,
+//     setNextCaptureInSec,
+//   ] =
+//     useState<
+//       number | null
+//     >(null);
+
+//   const [
+//     lastCapturedTime,
+//     setLastCapturedTime,
+//   ] =
+//     useState('');
+
+//   // ====================================================
+//   // GLOBAL ADMIN POLICY
+//   // ====================================================
+
+//   const [
+//     captureWindowSeconds,
+//     setCaptureWindowSeconds,
+//   ] =
+//     useState(
+//       Math.max(
+//         5,
+//         Number(
+//           storageSettings
+//             .captureIntervalSeconds ||
+//             600
+//         )
+//       )
+//     );
+
+//   const [
+//     screenshotsPerWindow,
+//     setScreenshotsPerWindow,
+//   ] =
+//     useState(5);
+
+//   const [
+//     capturePresetId,
+//     setCapturePresetId,
+//   ] =
+//     useState('10m-5');
+
+//   const [
+//     centralPolicyUpdatedAt,
+//     setCentralPolicyUpdatedAt,
+//   ] =
+//     useState('');
+
+//   // ====================================================
+//   // HISTORY
+//   // ====================================================
+
+//   const [
+//     selectedDate,
+//     setSelectedDate,
+//   ] =
+//     useState(
+//       getTodayDateKey()
+//     );
+
+//   const [
+//     activityHistory,
+//     setActivityHistory,
+//   ] =
+//     useState<
+//       ActivityHistoryRecord[]
+//     >([]);
+
+//   const [
+//     selectedDateSeconds,
+//     setSelectedDateSeconds,
+//   ] =
+//     useState(0);
+
+//   const [
+//     selectedDateScreenshotCount,
+//     setSelectedDateScreenshotCount,
+//   ] =
+//     useState(0);
+
+//   const [
+//     restoredScreenshots,
+//     setRestoredScreenshots,
+//   ] =
+//     useState<
+//       ScreenshotLog[]
+//     >([]);
+
+//   const [
+//     loadingHistory,
+//     setLoadingHistory,
+//   ] =
+//     useState(false);
+
+//   const [
+//     previewModal,
+//     setPreviewModal,
+//   ] =
+//     useState<
+//       ScreenshotLog | null
+//     >(null);
+
+//   // ====================================================
+//   // YEAR / MONTH HISTORY NAVIGATION
+//   // ====================================================
+
+//   const [selectedHistoryYear, setSelectedHistoryYear] =
+//     useState<string>(getTodayDateKey().slice(0, 4));
+
+//   const [selectedHistoryMonth, setSelectedHistoryMonth] =
+//     useState<string>(getTodayDateKey().slice(0, 7));
+
+//   // Blob URLs allow ngrok-protected screenshots to render in <img>.
+//   const [employeeScreenshotUrls, setEmployeeScreenshotUrls] =
+//     useState<Record<string, string>>({});
+
+//   // ====================================================
+//   // SCREEN CAPTURE
+//   // ====================================================
+
+//   const screenVideoRef =
+//     useRef<
+//       HTMLVideoElement | null
+//     >(null);
+
+//   const screenStreamRef =
+//     useRef<
+//       MediaStream | null
+//     >(null);
+
+//   // Counts input events received by this WorkMonitor page while tracking.
+//   // Browser security prevents a normal web page from observing keyboard/mouse
+//   // events in other tabs or other applications. No typed text is read/stored.
+//   const activityCountsRef = useRef<ScreenshotActivityCounts>({
+//     mouseMoves: 0,
+//     mouseClicks: 0,
+//     keyPresses: 0,
+//   });
+
+//   const lastMousePositionRef = useRef({
+//     x: 0,
+//     y: 0,
+//     initialized: false,
+//   });
+
+//   useEffect(() => {
+//     const handlePointerMove = (event: PointerEvent) => {
+//       if (!trackingRef.current || pausedRef.current) return;
+//       if (event.pointerType === 'touch') return;
+
+//       const last = lastMousePositionRef.current;
+//       const dx = event.clientX - last.x;
+//       const dy = event.clientY - last.y;
+
+//       if (!last.initialized) {
+//         last.x = event.clientX;
+//         last.y = event.clientY;
+//         last.initialized = true;
+//         return;
+//       }
+
+//       // Count each meaningful pointer movement (>= 2px), rather than waiting
+//       // for 10px from the previous accepted position; this was undercounting.
+//       if (Math.hypot(dx, dy) >= 2) {
+//         activityCountsRef.current.mouseMoves += 1;
+//         last.x = event.clientX;
+//         last.y = event.clientY;
+//       }
+//     };
+
+//     const handleMouseClick = (event: MouseEvent) => {
+//       if (!trackingRef.current || pausedRef.current) return;
+//       if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
+//       activityCountsRef.current.mouseClicks += 1;
+//     };
+
+//     const handleKeyDown = (event: KeyboardEvent) => {
+//       if (!trackingRef.current || pausedRef.current) return;
+//       // Count keydown events including OS/browser key-repeat events; never read
+//       // event.key or event.code, and never store the actual typed text.
+//       activityCountsRef.current.keyPresses += 1;
+//     };
+
+//     window.addEventListener('pointermove', handlePointerMove, { capture: true, passive: true });
+//     window.addEventListener('click', handleMouseClick, true);
+//     window.addEventListener('keydown', handleKeyDown, true);
+
+//     return () => {
+//       window.removeEventListener('pointermove', handlePointerMove, true);
+//       window.removeEventListener('click', handleMouseClick, true);
+//       window.removeEventListener('keydown', handleKeyDown, true);
+//     };
+//   }, []);
+
+//   const captureTimerRef =
+//     useRef<
+//       number | null
+//     >(null);
+
+//   const countdownRef =
+//     useRef<
+//       number | null
+//     >(null);
+
+//   const trackerTimerRef =
+//     useRef<
+//       number | null
+//     >(null);
+
+//   // Kept only so the cleanup effect below stays valid.
+//   const trackerSyncIntervalRef =
+//     useRef<
+//       number | null
+//     >(null);
+
+//   const trackingRef =
+//     useRef(false);
+
+//   const pausedRef =
+//     useRef(false);
+
+//   const daySecondsRef =
+//     useRef(0);
+
+//   // ---- Timestamp based timer (single source of truth) ----
+//   // elapsed = base seconds (saved) + (Date.now() - segment start)
+//   const sessionSecondsRef =
+//     useRef(0);
+
+//   const baseDayRef =
+//     useRef(0);
+
+//   const baseSessionRef =
+//     useRef(0);
+
+//   const segmentStartRef =
+//     useRef<number | null>(null);
+
+//   // Last time the 1-second heartbeat ran. A large gap means the computer was
+//   // asleep / the page was suspended; that period is never counted as work.
+//   const lastHeartbeatRef =
+//     useRef(Date.now());
+
+//   // Pending "track stayed muted" timer (screen capture unavailable).
+//   const muteTimerRef =
+//     useRef<number | null>(null);
+
+//   // True once the page is being unloaded/refreshed. The browser may end the
+//   // screen-share track during unload; that must not clear the "was tracking"
+//   // marker that drives the reconnect popup.
+//   const unloadingRef =
+//     useRef(false);
+
+//   // When a tracking session survives a page refresh (or an interruption), keep
+//   // the saved session duration so the next Start action resumes it instead of
+//   // resetting the current task to zero.
+//   const restoredSessionRef =
+//     useRef(false);
+
+//   const captureWindowRef =
+//     useRef(
+//       captureWindowSeconds
+//     );
+
+//   const capturePolicyRefreshAtRef =
+//     useRef(0);
+
+//   const screenshotCountRef =
+//     useRef(
+//       screenshotsPerWindow
+//     );
+
+//   // ====================================================
+//   // KEEP REFS CURRENT
+//   // ====================================================
+
+//   useEffect(() => {
+//     trackingRef.current =
+//       isTracking;
+//   }, [
+//     isTracking,
+//   ]);
+
+//   useEffect(() => {
+//     pausedRef.current =
+//       isPaused;
+//   }, [
+//     isPaused,
+//   ]);
+
+//   useEffect(() => {
+//     if (dayTotalSeconds > daySecondsRef.current) {
+//       daySecondsRef.current = dayTotalSeconds;
+//     }
+//   }, [dayTotalSeconds]);
+
+//   useEffect(() => {
+//     captureWindowRef.current =
+//       captureWindowSeconds;
+//   }, [
+//     captureWindowSeconds,
+//   ]);
+
+//   useEffect(() => {
+//     screenshotCountRef.current =
+//       screenshotsPerWindow;
+//   }, [
+//     screenshotsPerWindow,
+//   ]);
+
+//   // ====================================================
+//   // LOGIN BOOTSTRAP POLICY (NO POLLING)
+//   // ====================================================
+
+//   useEffect(() => {
+//     try {
+//       const raw = localStorage.getItem('workmonitor_employee_capture_settings');
+//       if (!raw) return;
+
+//       const settings = JSON.parse(raw);
+//       const newWindow = Math.max(5, Number(settings?.captureWindowSeconds || settings?.captureIntervalSeconds || 600));
+//       const newCount = Math.max(1, Number(settings?.screenshotsPerWindow || 5));
+//       const newPreset = String(settings?.presetId || '10m-5');
+
+//       setCaptureWindowSeconds(newWindow);
+//       setScreenshotsPerWindow(newCount);
+//       setCapturePresetId(newPreset);
+//       setCentralPolicyUpdatedAt(String(settings?.updatedAt || ''));
+//       captureWindowRef.current = newWindow;
+//       screenshotCountRef.current = newCount;
+//     } catch (error) {
+//       console.warn('Capture policy bootstrap warning:', error);
+//     }
+//   }, []);
+
+//   // ====================================================
+//   // LOCAL TIMER STORAGE
+//   // ====================================================
+
+//   const timerStorageKey =
+//     `wm_emp_timer_` +
+//     `${currentUser.id}_` +
+//     `${getTodayDateKey()}`;
+
+//   // Separate marker: was tracking active (running/paused) when the page closed?
+//   // Stored apart from the timer data so the timer save effect cannot overwrite it.
+//   const sessionFlagKey =
+//     `wm_emp_active_` +
+//     `${currentUser.id}_` +
+//     `${getTodayDateKey()}`;
+
+//   const setSessionFlag = (
+//     value: 'running' | 'paused' | null
+//   ) => {
+//     try {
+//       if (value) {
+//         localStorage.setItem(sessionFlagKey, value);
+//       } else {
+//         localStorage.removeItem(sessionFlagKey);
+//       }
+//     } catch {
+//       // ignore
+//     }
+//   };
+
+//   // Restore browser timer (state AND refs)
+//   useEffect(() => {
+//     try {
+//       const raw = localStorage.getItem(timerStorageKey);
+//       if (!raw) return;
+
+//       const saved = JSON.parse(raw);
+//       const savedDay = Math.max(0, Number(saved?.dayTotalSeconds) || 0);
+//       const savedSession = Math.max(0, Number(saved?.sessionSeconds) || 0);
+
+//       if (savedDay > daySecondsRef.current) {
+//         daySecondsRef.current = savedDay;
+//         setDayTotalSeconds(savedDay);
+//       }
+
+//       sessionSecondsRef.current = savedSession;
+//       setSessionSeconds(savedSession);
+
+//       if (savedSession > 0) {
+//         restoredSessionRef.current = true;
+//         setLastStatus(
+//           'Previous tracking time restored. Click Start Tracking to continue.'
+//         );
+//       }
+
+//       if (saved?.taskName) {
+//         setTaskName(saved.taskName);
+//       }
+//     } catch (error) {
+//       console.warn('Timer restore warning:', error);
+//     }
+//   }, [timerStorageKey]);
+
+//   // Page refreshed while tracking was running -> ask to reconnect screen sharing.
+//   // (Declared after the restore effect so its status message wins.)
+//   useEffect(() => {
+//     try {
+//       if (localStorage.getItem(sessionFlagKey) !== 'running') return;
+
+//       restoredSessionRef.current = true;
+//       setReconnectMessage(RECONNECT_POPUP_MESSAGE);
+//       setShowReconnectModal(true);
+//       setLastStatus(
+//         'Page refreshed. Timer paused. Reconnect screen sharing to resume tracking and screenshots.'
+//       );
+//     } catch {
+//       // ignore
+//     }
+//   }, [sessionFlagKey]);
+
+//   // Save timer
+//   useEffect(() => {
+//     // Never overwrite saved time with the initial zeros on mount.
+//     if (!isTracking && dayTotalSeconds === 0 && sessionSeconds === 0) {
+//       return;
+//     }
+
+//     try {
+//       localStorage.setItem(
+//         timerStorageKey,
+//         JSON.stringify({
+//           dayTotalSeconds,
+//           sessionSeconds,
+//           taskName,
+//           isTracking,
+//           isPaused,
+//           updatedAt: Date.now(),
+//         })
+//       );
+//     } catch {
+//       // ignore
+//     }
+//   }, [
+//     timerStorageKey,
+//     dayTotalSeconds,
+//     sessionSeconds,
+//     taskName,
+//     isTracking,
+//     isPaused,
+//   ]);
+
+//   // ====================================================
+//   // CENTRAL TRACKER SYNC
+//   // ====================================================
+
+//   const syncTrackerTime =
+//     async (
+//       seconds =
+//         daySecondsRef.current
+//     ) => {
+//       try {
+//         const response =
+//           await fetch(
+//             `${backendUrl}/api/tracker-time`,
+//             {
+//               method:
+//                 'POST',
+
+//               headers: {
+//                 ...backendHeaders,
+//                 'Content-Type':
+//                   'application/json',
+//               },
+
+//               body:
+//                 JSON.stringify({
+//                   employeeId:
+//                     currentUser.id,
+
+//                   employeeName:
+//                     currentUser.name,
+
+//                   dateKey:
+//                     getTodayDateKey(),
+
+//                   totalSeconds:
+//                     Math.max(
+//                       0,
+//                       Math.floor(
+//                         seconds
+//                       )
+//                     ),
+//                 }),
+//             }
+//           );
+
+//         const data =
+//           await readApiJson(
+//             response
+//           );
+
+//         if (
+//           !response.ok ||
+//           !data?.success
+//         ) {
+//           throw new Error(
+//             data?.error ||
+//               'Tracker sync failed'
+//           );
+//         }
+
+//         return Number(
+//           data.totalSeconds ||
+//             seconds
+//         );
+//       } catch (
+//         error
+//       ) {
+//         console.warn(
+//           'Tracker sync warning:',
+//           error
+//         );
+
+//         return seconds;
+//       }
+//     };
+
+//   // ====================================================
+//   // TIMER (single source of truth: timestamps)
+//   // ====================================================
+
+//   const readClock = () => {
+//     if (segmentStartRef.current === null) {
+//       return {
+//         day: daySecondsRef.current,
+//         session: sessionSecondsRef.current,
+//       };
+//     }
+
+//     const delta = Math.max(
+//       0,
+//       Math.floor((Date.now() - segmentStartRef.current) / 1000)
+//     );
+
+//     return {
+//       day: baseDayRef.current + delta,
+//       session: baseSessionRef.current + delta,
+//     };
+//   };
+
+//   const applyClock = () => {
+//     const { day, session } = readClock();
+
+//     daySecondsRef.current = day;
+//     sessionSecondsRef.current = session;
+
+//     setDayTotalSeconds(day);
+//     setSessionSeconds(session);
+
+//     return day;
+//   };
+
+//   const beginSegment = () => {
+//     baseDayRef.current = daySecondsRef.current;
+//     baseSessionRef.current = sessionSecondsRef.current;
+//     segmentStartRef.current = Date.now();
+//     lastHeartbeatRef.current = Date.now();
+//   };
+
+//   const endSegment = () => {
+//     const day = applyClock();
+//     segmentStartRef.current = null;
+//     return day;
+//   };
+
+//   // Freeze the clock at a past timestamp. Time after `ts` is discarded, so the
+//   // locked / sleeping period is never counted. Saved time is preserved.
+//   const freezeAt = (ts: number) => {
+//     if (segmentStartRef.current === null) return daySecondsRef.current;
+
+//     const delta = Math.max(
+//       0,
+//       Math.floor((Math.min(ts, Date.now()) - segmentStartRef.current) / 1000)
+//     );
+
+//     const day = baseDayRef.current + delta;
+//     const session = baseSessionRef.current + delta;
+
+//     daySecondsRef.current = day;
+//     sessionSecondsRef.current = session;
+
+//     setDayTotalSeconds(day);
+//     setSessionSeconds(session);
+
+//     segmentStartRef.current = null;
+
+//     return day;
+//   };
+
+//   const isStreamLive = (stream: MediaStream | null | undefined) => {
+//     const track = stream?.getVideoTracks()[0];
+//     return !!stream && stream.active && !!track && track.readyState === 'live';
+//   };
+
+//   // Pause tracking because the desktop was locked / the computer slept / the
+//   // screen share became unavailable. Reuses the existing reconnect popup,
+//   // reminders and startTracking() recovery (same state as page refresh).
+//   // Idempotent: duplicate triggers (ended + gap + mute) are ignored.
+//   const interruptTracking = (frozenAt?: number) => {
+//     if (!trackingRef.current) return;
+
+//     trackingRef.current = false;
+//     pausedRef.current = false;
+
+//     const finalSeconds =
+//       frozenAt === undefined ? endSegment() : freezeAt(frozenAt);
+
+//     clearCaptureTimers();
+
+//     if (muteTimerRef.current !== null) {
+//       window.clearTimeout(muteTimerRef.current);
+//       muteTimerRef.current = null;
+//     }
+
+//     setNextCaptureInSec(null);
+
+//     // Keep the saved session so reconnect resumes it (never resets to 0).
+//     restoredSessionRef.current = true;
+//     setSessionFlag('running');
+
+//     setIsTracking(false);
+//     setIsPaused(false);
+
+//     setReconnectMessage(RECONNECT_INTERRUPTED_MESSAGE);
+//     setShowReconnectModal(true);
+
+//     setLastStatus(
+//       'Tracking paused: desktop locked or screen sharing interrupted. Reconnect screen sharing to resume.'
+//     );
+
+//     void callGlobalActivityAgent('pause');
+//     void syncTrackerTime(finalSeconds);
+//   };
+
+//   // Returns true if tracking was interrupted because the page was not running
+//   // (sleep / long suspension). Only time up to the last heartbeat is counted.
+//   const checkHeartbeatGap = () => {
+//     if (
+//       !trackingRef.current ||
+//       pausedRef.current ||
+//       segmentStartRef.current === null
+//     ) {
+//       return false;
+//     }
+
+//     const now = Date.now();
+//     const last = lastHeartbeatRef.current;
+
+//     if (now - last > HEARTBEAT_GAP_MS) {
+//       interruptTracking(last);
+//       return true;
+//     }
+
+//     lastHeartbeatRef.current = now;
+//     return false;
+//   };
+
+//   // UI tick (display only; elapsed is always computed from timestamps).
+//   // Still ONE interval. Visibility/focus events only run the gap check; they
+//   // never pause tracking by themselves, so tab switching causes no false pause.
+//   useEffect(() => {
+//     if (!isTracking || isPaused) return;
+
+//     const tick = () => {
+//       if (!checkHeartbeatGap()) applyClock();
+//     };
+
+//     const id = window.setInterval(tick, 1000);
+
+//     const onWake = () => {
+//       if (document.visibilityState === 'visible') tick();
+//     };
+
+//     document.addEventListener('visibilitychange', onWake);
+//     document.addEventListener('resume', onWake);
+//     window.addEventListener('focus', onWake);
+
+//     return () => {
+//       window.clearInterval(id);
+//       document.removeEventListener('visibilitychange', onWake);
+//       document.removeEventListener('resume', onWake);
+//       window.removeEventListener('focus', onWake);
+//     };
+//   }, [isTracking, isPaused]);
+
+//   // Backend sync every 30 seconds while actively tracking
+//   useEffect(() => {
+//     if (!isTracking || isPaused) return;
+
+//     const id = window.setInterval(() => {
+//       if (trackingRef.current && !pausedRef.current) {
+//         // Never post sleep/lock time to the backend.
+//         if (checkHeartbeatGap()) return;
+//         void syncTrackerTime(readClock().day);
+//       }
+//     }, 30000);
+
+//     return () => window.clearInterval(id);
+//   }, [isTracking, isPaused]);
+
+//   // Best-effort sync when the page is reloaded/closed
+//   useEffect(() => {
+//     const onShow = () => {
+//       unloadingRef.current = false;
+//     };
+
+//     const onHide = () => {
+//       unloadingRef.current = true;
+
+//       if (!trackingRef.current) return;
+
+//       try {
+//         void fetch(`${backendUrl}/api/tracker-time`, {
+//           method: 'POST',
+//           keepalive: true,
+//           headers: { 'Content-Type': 'application/json' },
+//           body: JSON.stringify({
+//             employeeId: currentUser.id,
+//             employeeName: currentUser.name,
+//             dateKey: getTodayDateKey(),
+//             totalSeconds: readClock().day,
+//           }),
+//         });
+//       } catch {
+//         // ignore
+//       }
+//     };
+
+//     window.addEventListener('pagehide', onHide);
+//     window.addEventListener('pageshow', onShow);
+//     return () => {
+//       window.removeEventListener('pagehide', onHide);
+//       window.removeEventListener('pageshow', onShow);
+//     };
+//   }, [backendUrl, currentUser.id, currentUser.name]);
+
+//   // Reminders while the reconnect popup is open (every 60s, never overlapping):
+//   //  1) voice            - Chrome may block it until the page has had a click
+//   //  2) desktop notification - works when this tab/window is in the background
+//   //  3) tab title flash  - visible in the tab strip
+//   useEffect(() => {
+//     if (!showReconnectModal || isTracking) return;
+
+//     const originalTitle = document.title;
+//     let flashOn = false;
+//     let activeNotification: Notification | null = null;
+
+//     const speak = () => {
+//       try {
+//         if (!('speechSynthesis' in window)) return;
+
+//         const synth = window.speechSynthesis;
+
+//         // Avoid overlapping reminders.
+//         if (synth.speaking || synth.pending) return;
+
+//         const utterance = new SpeechSynthesisUtterance(
+//           RECONNECT_VOICE_MESSAGE
+//         );
+//         utterance.rate = 1;
+//         utterance.volume = 1;
+//         synth.speak(utterance);
+//       } catch {
+//         // Browser may block speech until the page has had a user interaction.
+//       }
+//     };
+
+//     const notify = () => {
+//       try {
+//         if (
+//           !('Notification' in window) ||
+//           Notification.permission !== 'granted'
+//         ) {
+//           return;
+//         }
+
+//         // Same tag replaces the previous alert, so they never pile up.
+//         activeNotification?.close();
+
+//         const notification = new Notification(RECONNECT_POPUP_TITLE, {
+//           body: RECONNECT_VOICE_MESSAGE,
+//           tag: 'wm-reconnect',
+//           requireInteraction: true,
+//           renotify: true,
+//         } as NotificationOptions & { renotify?: boolean });
+
+//         notification.onclick = () => {
+//           window.focus();
+//           notification.close();
+//         };
+
+//         activeNotification = notification;
+//       } catch {
+//         // ignore
+//       }
+//     };
+
+//     const remind = () => {
+//       speak();
+//       notify();
+//     };
+
+//     const reminderId = window.setInterval(remind, RECONNECT_REMINDER_MS);
+
+//     // Flash the tab title so the employee notices it from another tab.
+//     const flashId = window.setInterval(() => {
+//       flashOn = !flashOn;
+//       document.title = flashOn
+//         ? '⚠ Reconnect screen sharing'
+//         : originalTitle;
+//     }, 1000);
+
+//     return () => {
+//       window.clearInterval(reminderId);
+//       window.clearInterval(flashId);
+//       document.title = originalTitle;
+
+//       try {
+//         activeNotification?.close();
+//       } catch {
+//         // ignore
+//       }
+
+//       try {
+//         if ('speechSynthesis' in window) {
+//           window.speechSynthesis.cancel();
+//         }
+//       } catch {
+//         // ignore
+//       }
+//     };
+//   }, [showReconnectModal, isTracking]);
+
+//   // ====================================================
+//   // SCREEN SHARE
+//   // ====================================================
+
+//   const initScreenStream =
+//     async () => {
+//       try {
+//         if (
+//           !window.isSecureContext ||
+//           !navigator.mediaDevices ||
+//           typeof navigator.mediaDevices.getDisplayMedia !== 'function'
+//         ) {
+//           throw new Error(
+//             'Screen capture requires HTTPS.'
+//           );
+//         }
+
+//         // Reuse the existing stream only if it is genuinely live and not muted.
+//         // Otherwise drop it and ask for a fresh one (this runs inside a click).
+//         const existing = screenStreamRef.current;
+
+//         if (existing) {
+//           const existingTrack = existing.getVideoTracks()[0];
+
+//           if (isStreamLive(existing) && existingTrack && !existingTrack.muted) {
+//             return existing;
+//           }
+
+//           existing.getTracks().forEach((track) => {
+//             track.onended = null;
+//             track.onmute = null;
+//             track.onunmute = null;
+//             track.stop();
+//           });
+
+//           screenStreamRef.current = null;
+//         }
+
+//         let stream:
+//           MediaStream;
+
+//         try {
+//           stream =
+//             await navigator
+//               .mediaDevices
+//               .getDisplayMedia({
+//                 video: {
+//                   displaySurface:
+//                     'monitor',
+
+//                   frameRate: {
+//                     ideal:
+//                       5,
+
+//                     max:
+//                       15,
+//                   },
+//                 },
+
+//                 audio:
+//                   false,
+
+//                 monitorTypeSurfaces:
+//                   'include',
+
+//                 selfBrowserSurface:
+//                   'exclude',
+
+//                 surfaceSwitching:
+//                   'exclude',
+
+//                 preferCurrentTab:
+//                   false,
+//               } as any);
+//         } catch (firstError: any) {
+//           // The employee cancelled the chooser: do NOT open a second one.
+//           if (
+//             firstError?.name === 'NotAllowedError' ||
+//             firstError?.name === 'AbortError'
+//           ) {
+//             throw firstError;
+//           }
+
+//           stream =
+//             await navigator
+//               .mediaDevices
+//               .getDisplayMedia({
+//                 video:
+//                   true,
+
+//                 audio:
+//                   false,
+//               });
+//         }
+
+//         const videoTrack =
+//           stream.getVideoTracks()[
+//             0
+//           ];
+
+//         // Verify the returned stream is valid before using it.
+//         if (!videoTrack || videoTrack.readyState !== 'live') {
+//           stream.getTracks().forEach((track) => track.stop());
+
+//           throw new Error(
+//             'The selected screen is not available. Please try again.'
+//           );
+//         }
+
+//         videoTrack.onended =
+//           () => {
+//             screenStreamRef.current =
+//               null;
+
+//             if (
+//               screenVideoRef.current
+//             ) {
+//               screenVideoRef.current.srcObject =
+//                 null;
+//             }
+
+//             // Pause (not stop): keep saved time, open the existing reconnect
+//             // popup. interruptTracking also keeps the "running" marker, which
+//             // is exactly what the refresh flow needs after reload.
+//             interruptTracking();
+//           };
+
+//         // A capture track that stays muted is treated as unavailable.
+//         videoTrack.onmute =
+//           () => {
+//             const mutedAt = Date.now();
+
+//             if (muteTimerRef.current !== null) {
+//               window.clearTimeout(muteTimerRef.current);
+//             }
+
+//             muteTimerRef.current = window.setTimeout(() => {
+//               muteTimerRef.current = null;
+
+//               if (
+//                 videoTrack.muted &&
+//                 screenStreamRef.current?.getVideoTracks()[0] === videoTrack
+//               ) {
+//                 interruptTracking(mutedAt);
+//               }
+//             }, MUTE_GRACE_MS);
+//           };
+
+//         videoTrack.onunmute =
+//           () => {
+//             if (muteTimerRef.current !== null) {
+//               window.clearTimeout(muteTimerRef.current);
+//               muteTimerRef.current = null;
+//             }
+//           };
+
+//         screenStreamRef.current =
+//           stream;
+
+//         if (
+//           screenVideoRef.current
+//         ) {
+//           screenVideoRef.current.srcObject =
+//             stream;
+
+//           await screenVideoRef.current
+//             .play()
+//             .catch(
+//               () => {}
+//             );
+//         }
+
+//         return stream;
+//       } catch (
+//         error: any
+//       ) {
+//         console.error(
+//           'Screen permission error:',
+//           error
+//         );
+
+//         setLastStatus(
+//           `Screen capture permission required: ${
+//             error?.message ||
+//             'Cancelled'
+//           }`
+//         );
+
+//         return null;
+//       }
+//     };
+
+//   // ====================================================
+//   // CAPTURE CANVAS
+//   // ====================================================
+
+//   const captureCurrentScreen =
+//     async (
+//       stream:
+//         MediaStream
+//     ) => {
+
+//       let video =
+//         screenVideoRef.current;
+
+//       if (!video) {
+//         return null;
+//       }
+
+//       if (
+//         video.srcObject !==
+//         stream
+//       ) {
+//         video.srcObject =
+//           stream;
+//       }
+
+//       await video
+//         .play()
+//         .catch(
+//           () => {}
+//         );
+
+//       let attempts =
+//         0;
+
+//       while (
+//         (!video.videoWidth ||
+//           !video.videoHeight) &&
+//         attempts <
+//           30
+//       ) {
+//         await new Promise(
+//           (
+//             resolve
+//           ) =>
+//             setTimeout(
+//               resolve,
+//               100
+//             )
+//         );
+
+//         attempts++;
+//       }
+
+//       if (
+//         !video.videoWidth ||
+//         !video.videoHeight
+//       ) {
+//         throw new Error(
+//           'Screen frame is not ready.'
+//         );
+//       }
+
+//       const canvas =
+//         document.createElement(
+//           'canvas'
+//         );
+
+//       canvas.width =
+//         video.videoWidth;
+
+//       canvas.height =
+//         video.videoHeight;
+
+//       const ctx =
+//         canvas.getContext(
+//           '2d',
+//           {
+//             alpha:
+//               false,
+//           }
+//         );
+
+//       if (!ctx) {
+//         throw new Error(
+//           'Canvas unavailable.'
+//         );
+//       }
+
+//       ctx.drawImage(
+//         video,
+//         0,
+//         0,
+//         canvas.width,
+//         canvas.height
+//       );
+
+//       return canvas;
+//     };
+
+//   // ====================================================
+//   // SCREENSHOT UPLOAD
+//   // ====================================================
+
+//   const captureAndUpload =
+//     async () => {
+//       if (
+//         !trackingRef.current ||
+//         pausedRef.current
+//       ) {
+//         return;
+//       }
+
+//       try {
+//         setLastStatus(
+//           'Capturing screenshot...'
+//         );
+
+//         // If the computer slept since the last heartbeat, pause instead.
+//         if (checkHeartbeatGap()) {
+//           return;
+//         }
+
+//         // Scheduled captures must NEVER call getDisplayMedia (it needs a user
+//         // click). Use only the existing live stream; otherwise pause and ask
+//         // the employee to reconnect.
+//         const stream =
+//           screenStreamRef.current;
+
+//         if (!stream || !isStreamLive(stream)) {
+//           interruptTracking();
+//           return;
+//         }
+
+//         const canvas =
+//           await captureCurrentScreen(
+//             stream
+//           );
+
+//         if (!canvas) {
+//           return;
+//         }
+
+//         // Tracking was interrupted while the frame was being grabbed:
+//         // drop it so no black / invalid screenshot is saved.
+//         if (
+//           !trackingRef.current ||
+//           pausedRef.current ||
+//           !isStreamLive(stream)
+//         ) {
+//           return;
+//         }
+
+//         const format =
+//           storageSettings
+//             .screenshotFormat ||
+//           'webp';
+
+//         const {
+//           blob,
+//           mimeType,
+//           extension,
+//         } =
+//           await canvasToBlob(
+//             canvas,
+//             format
+//           );
+
+//         const now =
+//           new Date();
+
+//         const dateKey =
+//           getTodayDateKey(
+//             now
+//           );
+
+//         const timeFormatted =
+//           formatTimeString(
+//             now
+//           );
+
+//         const hourKey =
+//           getHourSlotKey(
+//             now
+//           );
+
+//         const safeTime =
+//           now
+//             .toTimeString()
+//             .split(' ')[0]
+//             .replace(
+//               /:/g,
+//               '-'
+//             );
+
+//         const fileName =
+//           `Screen_${dateKey}_${safeTime}.${extension}`;
+
+//         // Freeze this screenshot's activity interval before awaiting uploads,
+//         // so events occurring during a slow upload belong to the next interval.
+//         // Snapshot global Windows input first. If the optional agent is not
+//         // running, counts fall back to zero.
+//         const globalCounts = await callGlobalActivityAgent('snapshot');
+
+//         const activityCounts: ScreenshotActivityCounts = {
+//           mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
+//           mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
+//           keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
+//           activityPercent: Math.min(
+//             100,
+//             Math.max(0, Number(globalCounts?.activityPercent) || 0)
+//           ),
+//           activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
+//           trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
+//         };
+
+//         activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
+//         lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
+
+//         const result =
+//           await uploadScreenshotLocally(
+//             blob,
+//             fileName,
+//             currentUser.id,
+//             currentUser.name,
+//             dateKey
+//           );
+
+//         const thumbnail =
+//           generateThumbnailDataUrl(
+//             canvas,
+//             640,
+//             360,
+//             0.75
+//           );
+
+//         const fullDataUrl =
+//           canvas.toDataURL(
+//             mimeType,
+//             0.9
+//           );
+
+//         // Persist by stable screenshot filename so the counts can be restored
+//         // after refresh/logout even when the screenshot log ID is regenerated.
+//         saveActivityCounts(
+//           currentUser.id,
+//           dateKey,
+//           fileName,
+//           activityCounts
+//         );
+
+//         const id =
+//           `scr-${Date.now()}`;
+
+//         setCachedScreenshot(
+//           id,
+//           fullDataUrl
+//         );
+
+//         const log = {
+//             id,
+
+//             userId:
+//               currentUser.id,
+
+//             userName:
+//               currentUser.name,
+
+//             userEmail:
+//               currentUser.email,
+
+//             taskName,
+
+//             timestamp:
+//               now.toISOString(),
+
+//             timeFormatted,
+
+//             hourKey,
+
+//             dateKey,
+
+//             activityCounts,
+
+//             fileFormat:
+//               format,
+
+//             driveFileId:
+//               result.fileId,
+
+//             driveThumbnailLink:
+//               result.localUrl,
+
+//             previewDataUrl:
+//               thumbnail,
+
+//             productivityScore:
+//               92,
+
+//             productivityLabel:
+//               'High',
+//           } as ScreenshotLog & {
+//             activityCounts: ScreenshotActivityCounts;
+//           };
+
+//         onNewScreenshot(
+//           log
+//         );
+
+//         // Keep Admin in sync after every screenshot. This only READS the
+//         // timer; it never changes timer state.
+//         void syncTrackerTime(readClock().day);
+
+//         // Persist counts so they survive refresh/logout and can be read
+//         // back for screenshot history. A count-save failure must not undo a screenshot.
+//         try {
+//           const response = await fetch(`${backendUrl}/api/activity-snapshot`, {
+//             method: 'POST',
+//             headers: { 'Content-Type': 'application/json' },
+//             body: JSON.stringify({
+//               employeeId: currentUser.id,
+//               employeeName: currentUser.name,
+//               dateKey,
+//               screenshotKey: fileName,
+//               capturedAt: now.toISOString(),
+//               mouseMoves: activityCounts.mouseMoves,
+//               mouseClicks: activityCounts.mouseClicks,
+//               keyPresses: activityCounts.keyPresses,
+//               activeSeconds: activityCounts.activeSeconds ?? 0,
+//               trackedSeconds: activityCounts.trackedSeconds ?? 0,
+//             }),
+//           });
+//           if (!response.ok) {
+//             console.warn('Activity snapshot save failed:', response.status, await response.text());
+//           }
+//         } catch (activitySaveError) {
+//           console.warn('Activity snapshot save failed:', activitySaveError);
+//         }
+
+//         // Update the visible selected-date count immediately for this local
+//         // capture. The IndexedDB queue is not counted by the Worker until the
+//         // hourly batch upload succeeds.
+//         if (selectedDate === dateKey) {
+//           setSelectedDateScreenshotCount(
+//             (previous) => previous + 1
+//           );
+//         }
+
+//         setLastCapturedTime(
+//           timeFormatted
+//         );
+
+//         setLastStatus(
+//           `✅ Screenshot saved locally and queued for cloud upload. ${
+//             isScreenshotUploadWindowOpen()
+//               ? 'Cloud upload runs in hourly batches.'
+//               : 'Cloud sharing is paused outside 08:30 AM–08:30 PM IST.'
+//           }`
+//         );
+
+//         // Do not reload cloud history after every screenshot.
+//         // The screenshot is already added to the local UI via onNewScreenshot().
+//         // History is fetched only when the user explicitly opens/refreshes it.
+//       } catch (
+//         error: any
+//       ) {
+//         console.error(
+//           'Capture error:',
+//           error
+//         );
+
+//         setLastStatus(
+//           `Capture warning: ${
+//             error?.message ||
+//             'Unknown error'
+//           }`
+//         );
+//       }
+//     };
+
+//   // ====================================================
+//   // RANDOM SCREENSHOT WINDOW
+//   // ====================================================
+
+//   const clearCaptureTimers =
+//     () => {
+//       if (
+//         captureTimerRef.current
+//       ) {
+//         clearTimeout(
+//           captureTimerRef.current
+//         );
+
+//         captureTimerRef.current =
+//           null;
+//       }
+
+//       if (
+//         countdownRef.current
+//       ) {
+//         clearInterval(
+//           countdownRef.current
+//         );
+
+//         countdownRef.current =
+//           null;
+//       }
+//     };
+
+//   const scheduleRandomWindow =
+//     (
+//       windowSeconds =
+//         captureWindowRef.current,
+
+//       screenshotCount =
+//         screenshotCountRef.current
+//     ) => {
+
+//       clearCaptureTimers();
+
+//       if (
+//         !trackingRef.current ||
+//         pausedRef.current
+//       ) {
+//         return;
+//       }
+
+//       const safeWindow =
+//         Math.max(
+//           5,
+//           Math.floor(
+//             Number(
+//               windowSeconds
+//             ) || 600
+//           )
+//         );
+
+//       const safeCount =
+//         Math.max(
+//           1,
+//           Math.floor(
+//             Number(
+//               screenshotCount
+//             ) || 1
+//           )
+//         );
+
+//       const windowMs =
+//         safeWindow *
+//         1000;
+
+//       // Divide full window into random zones.
+//       // This keeps shots random but prevents them
+//       // all coming at exactly the same second.
+//       const randomPositions =
+//         Array.from(
+//           {
+//             length:
+//               safeCount,
+//           },
+
+//           (
+//             _,
+//             index
+//           ) => {
+
+//             const zoneStart =
+//               (
+//                 windowMs *
+//                 index
+//               ) /
+//               safeCount;
+
+//             const zoneEnd =
+//               (
+//                 windowMs *
+//                 (
+//                   index +
+//                   1
+//                 )
+//               ) /
+//               safeCount;
+
+//             const padding =
+//               Math.min(
+//                 500,
+//                 Math.max(
+//                   50,
+//                   (
+//                     zoneEnd -
+//                     zoneStart
+//                   ) *
+//                     0.05
+//                 )
+//               );
+
+//             const start =
+//               zoneStart +
+//               padding;
+
+//             const end =
+//               Math.max(
+//                 start +
+//                   25,
+//                 zoneEnd -
+//                   padding
+//               );
+
+//             return Math.floor(
+//               start +
+//                 Math.random() *
+//                   (
+//                     end -
+//                     start
+//                   )
+//             );
+//           }
+//         ).sort(
+//           (
+//             a,
+//             b
+//           ) =>
+//             a - b
+//         );
+
+//       let index =
+//         0;
+
+//       let elapsedPosition =
+//         0;
+
+//       const scheduleNext =
+//         () => {
+
+//           if (
+//             !trackingRef.current ||
+//             pausedRef.current
+//           ) {
+//             clearCaptureTimers();
+//             return;
+//           }
+
+//           // All screenshots done.
+//           // Wait until current window finishes,
+//           // then generate a fresh random window.
+//           if (
+//             index >=
+//             randomPositions.length
+//           ) {
+//             const remaining =
+//               Math.max(
+//                 100,
+//                 windowMs -
+//                   elapsedPosition
+//               );
+
+//             setNextCaptureInSec(
+//               Math.ceil(
+//                 remaining /
+//                   1000
+//               )
+//             );
+
+//             countdownRef.current =
+//               window.setInterval(
+//                 () => {
+//                   setNextCaptureInSec(
+//                     (
+//                       previous
+//                     ) =>
+//                       previous ===
+//                         null ||
+//                       previous <=
+//                         1
+//                         ? 0
+//                         : previous -
+//                           1
+//                   );
+//                 },
+//                 1000
+//               );
+
+//             captureTimerRef.current =
+//               window.setTimeout(
+//                 () => {
+//                   clearCaptureTimers();
+
+//                   scheduleRandomWindow(
+//                     safeWindow,
+//                     safeCount
+//                   );
+//                 },
+//                 remaining
+//               );
+
+//             return;
+//           }
+
+//           const position =
+//             randomPositions[
+//               index
+//             ];
+
+//           const delay =
+//             Math.max(
+//               50,
+//               position -
+//                 elapsedPosition
+//             );
+
+//           setNextCaptureInSec(
+//             Math.max(
+//               1,
+//               Math.ceil(
+//                 delay /
+//                   1000
+//               )
+//             )
+//           );
+
+//           countdownRef.current =
+//             window.setInterval(
+//               () => {
+//                 setNextCaptureInSec(
+//                   (
+//                     previous
+//                   ) =>
+//                     previous ===
+//                       null ||
+//                     previous <=
+//                       1
+//                       ? 0
+//                       : previous -
+//                         1
+//                 );
+//               },
+//               1000
+//             );
+
+//           captureTimerRef.current =
+//             window.setTimeout(
+//               async () => {
+
+//                 if (
+//                   countdownRef.current
+//                 ) {
+//                   clearInterval(
+//                     countdownRef.current
+//                   );
+
+//                   countdownRef.current =
+//                     null;
+//                 }
+
+//                 await captureAndUpload();
+
+//                 elapsedPosition =
+//                   position;
+
+//                 index++;
+
+//                 scheduleNext();
+//               },
+//               delay
+//             );
+//         };
+
+//       scheduleNext();
+//     };
+
+//   // ====================================================
+//   // CAPTURE POLICY REFRESH (FOCUS/VISIBILITY ONLY)
+//   // ====================================================
+//   // Admin changes are picked up when the employee returns to the tab.
+//   // There is deliberately no interval polling.
+//   const refreshCapturePolicy = async () => {
+//     const now = Date.now();
+
+//     // Focus + visibilitychange can fire together. Avoid duplicate
+//     // requests while still picking up admin changes quickly.
+//     if (
+//       now -
+//         capturePolicyRefreshAtRef.current <
+//       30000
+//     ) {
+//       return;
+//     }
+
+//     capturePolicyRefreshAtRef.current = now;
+
+//     try {
+//       const response = await fetch(
+//         `${backendUrl}/api/capture-settings`,
+//         {
+//           cache: 'no-store',
+//           headers: backendHeaders,
+//         }
+//       );
+
+//       const data = await readApiJson(response);
+
+//       if (
+//         !response.ok ||
+//         !data?.success ||
+//         !data?.settings
+//       ) {
+//         return;
+//       }
+
+//       const settings = data.settings;
+//       const newWindow = Math.max(
+//         5,
+//         Number(
+//           settings.captureWindowSeconds ||
+//           settings.captureIntervalSeconds ||
+//           600
+//         )
+//       );
+//       const newCount = Math.max(
+//         1,
+//         Number(settings.screenshotsPerWindow || 5)
+//       );
+//       const newPreset = String(
+//         settings.presetId || 'custom'
+//       );
+//       const newUpdatedAt = String(
+//         settings.updatedAt || ''
+//       );
+
+//       const changed =
+//         newWindow !== captureWindowRef.current ||
+//         newCount !== screenshotCountRef.current ||
+//         newPreset !== capturePresetId ||
+//         newUpdatedAt !== centralPolicyUpdatedAt;
+
+//       setCaptureWindowSeconds(newWindow);
+//       setScreenshotsPerWindow(newCount);
+//       setCapturePresetId(newPreset);
+//       setCentralPolicyUpdatedAt(newUpdatedAt);
+
+//       captureWindowRef.current = newWindow;
+//       screenshotCountRef.current = newCount;
+
+//       if (
+//         changed &&
+//         trackingRef.current &&
+//         !pausedRef.current
+//       ) {
+//         scheduleRandomWindow(
+//           newWindow,
+//           newCount
+//         );
+//       }
+
+//       try {
+//         localStorage.setItem(
+//           'workmonitor_employee_capture_settings',
+//           JSON.stringify(settings)
+//         );
+//       } catch {
+//         // ignore local cache errors
+//       }
+//     } catch (error) {
+//       console.warn(
+//         'Capture policy refresh warning:',
+//         error
+//       );
+//     }
+//   };
+
+//   useEffect(() => {
+//     const handleVisibilityOrFocus = () => {
+//       if (
+//         document.visibilityState === 'visible'
+//       ) {
+//         void refreshCapturePolicy();
+//       }
+//     };
+
+//     window.addEventListener(
+//       'focus',
+//       handleVisibilityOrFocus
+//     );
+//     document.addEventListener(
+//       'visibilitychange',
+//       handleVisibilityOrFocus
+//     );
+
+//     return () => {
+//       window.removeEventListener(
+//         'focus',
+//         handleVisibilityOrFocus
+//       );
+//       document.removeEventListener(
+//         'visibilitychange',
+//         handleVisibilityOrFocus
+//       );
+//     };
+//   }, [backendUrl, capturePresetId, centralPolicyUpdatedAt]);
+
+//   // ====================================================
+//   // HOURLY CLOUD UPLOAD QUEUE
+//   // ====================================================
+
+//   useEffect(() => {
+//     const stopScheduler = startScreenshotUploadScheduler(currentUser.id);
+//     return stopScheduler;
+//   }, []);
+
+//   // ====================================================
+//   // HISTORY
+//   // ====================================================
+
+//   const loadDateHistory =
+//     async () => {
+//       setLoadingHistory(
+//         true
+//       );
+//       // Reset the selected-date count before loading a different date so an
+//       // older date's screenshot count is not carried into the new selection.
+//       setSelectedDateScreenshotCount(0);
+
+//       try {
+//         const [
+//           historyResponse,
+//           activityResponse,
+//         ] =
+//           await Promise.all([
+//             fetch(
+//               `${backendUrl}/api/activity-history/${encodeURIComponent(
+//                 currentUser.id
+//               )}`,
+//               {
+//                 cache:
+//                   'no-store',
+//                 headers:
+//                   backendHeaders,
+//               }
+//             ),
+
+//             fetch(
+//               `${backendUrl}/api/activity/${encodeURIComponent(
+//                 currentUser.id
+//               )}/${encodeURIComponent(
+//                 selectedDate
+//               )}`,
+//               {
+//                 cache:
+//                   'no-store',
+//                 headers:
+//                   backendHeaders,
+//               }
+//             ),
+//           ]);
+
+//         const historyData =
+//           await readApiJson(
+//             historyResponse
+//           );
+
+//         const activityData =
+//           await readApiJson(
+//             activityResponse
+//           );
+
+//         if (
+//           historyResponse.ok &&
+//           historyData?.success
+//         ) {
+//           const records = Array.isArray(historyData.records)
+//             ? historyData.records
+//             : [];
+
+//           setActivityHistory(records);
+
+//           const todayKey = getTodayDateKey();
+
+//           const todayRecord = records.find(
+//             (record: ActivityHistoryRecord) =>
+//               record.dateKey === todayKey
+//           );
+
+//           const serverTodaySeconds = Math.max(
+//             0,
+//             Number(todayRecord?.totalSeconds) || 0
+//           );
+
+//           // If the server has more time than this browser, move the timer
+//           // forward (base + display) so the running clock does not undo it.
+//           if (serverTodaySeconds > daySecondsRef.current) {
+//             const diff = serverTodaySeconds - daySecondsRef.current;
+//             baseDayRef.current += diff;
+//             daySecondsRef.current = serverTodaySeconds;
+//             setDayTotalSeconds(serverTodaySeconds);
+//           }
+//         }
+
+//         if (
+//           activityResponse.ok &&
+//           activityData
+//             ?.success
+//         ) {
+//           setSelectedDateSeconds(
+//             Math.max(
+//               0,
+//               Number(
+//                 activityData
+//                   .totalSeconds ||
+//                   0
+//               )
+//             )
+//           );
+
+//           setSelectedDateScreenshotCount(
+//             Math.max(
+//               0,
+//               Number(
+//                 activityData
+//                   .screenshotCount ||
+//                   0
+//               )
+//             )
+//           );
+//         } else {
+//           setSelectedDateSeconds(
+//             0
+//           );
+
+//           setSelectedDateScreenshotCount(
+//             0
+//           );
+//         }
+
+//         // Central files
+//         const files =
+//           await getLocalScreenshots(
+//             currentUser.id,
+//             selectedDate
+//           );
+
+//         const restored:
+//           ScreenshotLog[] =
+//           files.map(
+//             (
+//               item,
+//               index
+//             ) => {
+
+//               const fileName =
+//                 item.fileName;
+
+//               const url =
+//                 item.localUrl;
+
+//               const match =
+//                 fileName.match(
+//                   /Screen_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})\.(webp|png|jpg|jpeg)$/i
+//                 );
+
+//               let timestamp =
+//                 `${selectedDate}T00:00:00`;
+
+//               let timeFormatted =
+//                 '';
+
+//               let hourKey =
+//                 '';
+
+//               if (match) {
+//                 const [
+//                   ,
+//                   date,
+//                   hh,
+//                   mm,
+//                   ss,
+//                 ] =
+//                   match;
+
+//                 const dateObject =
+//                   new Date(
+//                     `${date}T${hh}:${mm}:${ss}`
+//                   );
+
+//                 timestamp =
+//                   dateObject.toISOString();
+
+//                 timeFormatted =
+//                   formatTimeString(
+//                     dateObject
+//                   );
+
+//                 hourKey =
+//                   getHourSlotKey(
+//                     dateObject
+//                   );
+//               }
+
+//               const extension =
+//                 fileName
+//                   .toLowerCase()
+//                   .endsWith(
+//                     '.png'
+//                   )
+//                   ? 'png'
+//                   : fileName
+//                       .toLowerCase()
+//                       .match(
+//                         /\.jpe?g$/
+//                       )
+//                     ? 'jpg'
+//                     : 'webp';
+
+//               return {
+//                 id:
+//                   `saved-${selectedDate}-${fileName}-${index}`,
+
+//                 userId:
+//                   currentUser.id,
+
+//                 userName:
+//                   currentUser.name,
+
+//                 userEmail:
+//                   currentUser.email,
+
+//                 taskName:
+//                   'Saved Screenshot',
+
+//                 timestamp,
+
+//                 timeFormatted,
+
+//                 hourKey,
+
+//                 dateKey:
+//                   selectedDate,
+
+//                 activityCounts: readSavedActivityCounts(
+//                   currentUser.id,
+//                   selectedDate,
+//                   fileName
+//                 ),
+
+//                 fileFormat:
+//                   extension,
+
+//                 driveFileId:
+//                   fileName,
+
+//                 driveThumbnailLink:
+//                   url,
+
+//                 previewDataUrl:
+//                   url,
+//               };
+//             }
+//           );
+
+//         // Prefer server-persisted counts when available; localStorage is only
+//         // a fallback for screenshots created before backend persistence existed.
+//         try {
+//           const activityResponse = await fetch(
+//             `${backendUrl}/api/activity-snapshots/${encodeURIComponent(currentUser.id)}/${selectedDate}`
+//           );
+//           if (activityResponse.ok) {
+//             const activityPayload = await activityResponse.json();
+//             const countsByFile = new Map<string, ScreenshotActivityCounts>();
+//             for (const snapshot of (activityPayload?.snapshots || [])) {
+//               if (snapshot?.screenshotKey) {
+//                 countsByFile.set(snapshot.screenshotKey, {
+//                   mouseMoves: Math.max(0, Number(snapshot.mouseMoves) || 0),
+//                   mouseClicks: Math.max(0, Number(snapshot.mouseClicks) || 0),
+//                   keyPresses: Math.max(0, Number(snapshot.keyPresses) || 0),
+//                 });
+//               }
+//             }
+//             for (const screenshot of restored as (ScreenshotLog & { activityCounts?: ScreenshotActivityCounts; fileName?: string })[]) {
+//               const fileKey = String(screenshot.fileName || screenshot.driveFileId || '');
+//               const serverCounts = countsByFile.get(fileKey);
+//               if (serverCounts) {
+//                 const localCounts = screenshot.activityCounts;
+
+//                 const mergedCounts: ScreenshotActivityCounts = {
+//                   ...serverCounts,
+//                   activityPercent: localCounts?.activityPercent ?? 0,
+//                   activeSeconds: localCounts?.activeSeconds ?? 0,
+//                   trackedSeconds: localCounts?.trackedSeconds ?? 0,
+//                 };
+
+//                 screenshot.activityCounts = mergedCounts;
+//                 saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
+//               }
+//             }
+//           }
+//         } catch (activityFetchError) {
+//           console.warn('Activity snapshot fetch failed; using local counts:', activityFetchError);
+//         }
+
+//         restored.sort(
+//           (
+//             a,
+//             b
+//           ) =>
+//             new Date(
+//               b.timestamp
+//             ).getTime() -
+//             new Date(
+//               a.timestamp
+//             ).getTime()
+//         );
+
+//         setRestoredScreenshots(
+//           restored
+//         );
+
+//         // The API count includes centrally uploaded screenshots only. Also
+//         // count locally queued screenshots so the employee sees captures
+//         // before their next hourly upload.
+//         setSelectedDateScreenshotCount(
+//           (currentCount) => Math.max(currentCount, restored.length)
+//         );
+//       } catch (
+//         error
+//       ) {
+//         console.warn(
+//           'History warning:',
+//           error
+//         );
+//       } finally {
+//         setLoadingHistory(
+//           false
+//         );
+//       }
+//     };
+
+//   // Load history when the dashboard opens and when the employee selects a
+//   // different date. This is event-driven, not polling, so it avoids repeated
+//   // Worker requests while keeping the selected date's history accurate.
+//   useEffect(() => {
+//     void loadDateHistory();
+//     // loadDateHistory is intentionally omitted because it is recreated on
+//     // render; the stable triggers are the user ID and selected date.
+//     // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [currentUser.id, selectedDate]);
+
+//   // ====================================================
+//   // MERGE SCREENSHOTS
+//   // ====================================================
+
+//   const mergedScreenshots =
+//     useMemo(() => {
+
+//       const map =
+//         new Map<
+//           string,
+//           ScreenshotLog
+//         >();
+
+//       restoredScreenshots.forEach(
+//         (
+//           screenshot
+//         ) => {
+
+//           const key =
+//             screenshot
+//               .driveThumbnailLink ||
+//             screenshot
+//               .driveFileId ||
+//             screenshot.id;
+
+//           map.set(
+//             key,
+//             screenshot
+//           );
+//         }
+//       );
+
+//       userScreenshots.forEach(
+//         (
+//           screenshot
+//         ) => {
+
+//           if (
+//             screenshot.dateKey !==
+//             selectedDate
+//           ) {
+//             return;
+//           }
+
+//           const key =
+//             screenshot
+//               .driveThumbnailLink ||
+//             screenshot
+//               .driveFileId ||
+//             screenshot.id;
+
+//           map.set(
+//             key,
+//             screenshot
+//           );
+//         }
+//       );
+
+//       return Array.from(
+//         map.values()
+//       ).sort(
+//         (
+//           a,
+//           b
+//         ) =>
+//           new Date(
+//             b.timestamp
+//           ).getTime() -
+//           new Date(
+//             a.timestamp
+//           ).getTime()
+//       );
+//     }, [
+//       restoredScreenshots,
+//       userScreenshots,
+//       selectedDate,
+//     ]);
+
+//   // ---- Screenshot pagination (client-side, filtered list only) ----
+//   const screenshotPagination = usePagination(
+//     mergedScreenshots,
+//     `${currentUser.id}|${selectedDate}`
+//   );
+//   const pagedScreenshots = screenshotPagination.pageItems;
 
 
+//   // ====================================================
+//   // YEAR / MONTH HISTORY GROUPS
+//   // ====================================================
+
+//   const historyYears = useMemo(() => {
+//     return Array.from(
+//       new Set(
+//         activityHistory
+//           .map((record) => record.dateKey.slice(0, 4))
+//           .filter(Boolean)
+//       )
+//     ).sort((a, b) => b.localeCompare(a));
+//   }, [activityHistory]);
+
+//   const historyMonths = useMemo(() => {
+//     return Array.from(
+//       new Set(
+//         activityHistory
+//           .filter((record) => record.dateKey.startsWith(`${selectedHistoryYear}-`))
+//           .map((record) => record.dateKey.slice(0, 7))
+//       )
+//     ).sort((a, b) => b.localeCompare(a));
+//   }, [activityHistory, selectedHistoryYear]);
+
+//   const filteredHistoryDates = useMemo(() => {
+//     return activityHistory
+//       .filter((record) => record.dateKey.startsWith(`${selectedHistoryMonth}-`))
+//       .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+//   }, [activityHistory, selectedHistoryMonth]);
+
+//   useEffect(() => {
+//     if (!activityHistory.length) return;
+
+//     const preferredYear =
+//       historyYears.includes(selectedDate.slice(0, 4))
+//         ? selectedDate.slice(0, 4)
+//         : historyYears[0];
+
+//     if (preferredYear && preferredYear !== selectedHistoryYear) {
+//       setSelectedHistoryYear(preferredYear);
+//     }
+//   }, [activityHistory, historyYears, selectedDate, selectedHistoryYear]);
+
+//   useEffect(() => {
+//     if (!historyMonths.length) return;
+
+//     const dateMonth = selectedDate.slice(0, 7);
+//     const preferredMonth =
+//       historyMonths.includes(dateMonth)
+//         ? dateMonth
+//         : historyMonths[0];
+
+//     if (preferredMonth && preferredMonth !== selectedHistoryMonth) {
+//       setSelectedHistoryMonth(preferredMonth);
+//     }
+//   }, [historyMonths, selectedDate, selectedHistoryMonth]);
+
+//   const monthLabel = (monthKey: string) => {
+//     const [year, month] = monthKey.split('-').map(Number);
+//     return new Date(year, Math.max(0, month - 1), 1).toLocaleString(
+//       undefined,
+//       { month: 'long' }
+//     );
+//   };
+
+//   // ====================================================
+//   // EMPLOYEE SCREENSHOT IMAGE LOADING
+//   // ====================================================
+//   // Only fetch a screenshot image once per source URL.
+//   // Previously this effect refetched EVERY existing screenshot whenever
+//   // mergedScreenshots changed. Because a new screenshot changed that array,
+//   // one new screenshot could trigger hundreds of old image requests again.
+//   const employeeScreenshotUrlCacheRef =
+//     useRef<Record<string, string>>({});
+
+//   useEffect(() => {
+//     let cancelled = false;
+
+//     const loadImages = async () => {
+//       const loaded: Record<string, string> = {};
+//       const cache = employeeScreenshotUrlCacheRef.current;
+
+//       for (const screenshot of pagedScreenshots) {
+//         const source =
+//           screenshot.driveThumbnailLink ||
+//           screenshot.previewDataUrl ||
+//           '';
+
+//         if (!source || cancelled) continue;
+
+//         // Fresh in-browser captures are already data/blob URLs.
+//         if (source.startsWith('data:') || source.startsWith('blob:')) {
+//           loaded[source] = source;
+//           continue;
+//         }
+
+//         // Reuse an already-loaded cloud image instead of fetching it again.
+//         const cachedUrl = cache[source];
+//         if (cachedUrl) {
+//           loaded[source] = cachedUrl;
+//           continue;
+//         }
+
+//         try {
+//           const response = await fetch(source, {
+//             method: 'GET',
+//             cache: 'force-cache',
+//             headers: {
+//             },
+//           });
+
+//           if (!response.ok) {
+//             throw new Error(`HTTP ${response.status}`);
+//           }
+
+//           const blob = await response.blob();
+//           if (cancelled) return;
+
+//           const objectUrl = URL.createObjectURL(blob);
+//           cache[source] = objectUrl;
+//           loaded[source] = objectUrl;
+//         } catch (error) {
+//           // Keep a direct image URL as a fallback. Cross-origin <img> can
+//           // display images even when fetch() -> Blob is blocked by CORS.
+//           // This avoids a blank Employee Screenshot History when Admin can
+//           // already see the same uploaded screenshot.
+//           console.warn(
+//             'Employee screenshot fetch failed; using direct image URL:',
+//             screenshot.driveFileId,
+//             error
+//           );
+//           loaded[source] = source;
+//         }
+//       }
+
+//       if (!cancelled) {
+//         setEmployeeScreenshotUrls(loaded);
+//       }
+//     };
+
+//     void loadImages();
+
+//     return () => {
+//       cancelled = true;
+//     };
+//   }, [pagedScreenshots]);
+
+//   // ====================================================
+//   // START
+//   // ====================================================
+
+//   const startTracking =
+//     async () => {
+
+//       // Opens the browser screen chooser (inside the user's click) unless the
+//       // existing stream is still live. Returns null if the employee cancels;
+//       // then the timer stays paused and the reconnect popup stays visible.
+//       const stream =
+//         await initScreenStream();
+
+//       if (!stream) {
+//         return;
+//       }
+
+//       // Screen is shared (first start OR reconnect after refresh/lock/sleep).
+//       setSessionFlag('running');
+//       setShowReconnectModal(false);
+//       setReconnectMessage(RECONNECT_POPUP_MESSAGE);
+
+//       // Ask once (non-blocking) so reconnect alerts can reach the employee
+//       // even when this tab is in the background.
+//       try {
+//         if (
+//           'Notification' in window &&
+//           Notification.permission === 'default'
+//         ) {
+//           void Notification.requestPermission();
+//         }
+//       } catch {
+//         // ignore
+//       }
+
+//       trackingRef.current =
+//         true;
+
+//       pausedRef.current =
+//         false;
+
+//       const globalAgentStarted = await callGlobalActivityAgent('start');
+
+//       setIsTracking(
+//         true
+//       );
+
+//       setIsPaused(
+//         false
+//       );
+
+//       if (restoredSessionRef.current) {
+//         restoredSessionRef.current = false;
+//       } else {
+//         sessionSecondsRef.current = 0;
+//         setSessionSeconds(0);
+//       }
+
+//       // Timer starts from saved accumulated seconds + this timestamp.
+//       beginSegment();
+
+//       setLastStatus(
+//         globalAgentStarted === null
+//           ? '✅ Tracking started. Browser-only activity counting: start the Windows activity agent for whole-device counts.'
+//           : '✅ Tracking started with Windows-wide activity counting.'
+//       );
+
+//       await syncTrackerTime();
+
+//       scheduleRandomWindow(
+//         captureWindowRef.current,
+//         screenshotCountRef.current
+//       );
+//     };
+
+//   // ====================================================
+//   // PAUSE
+//   // ====================================================
+
+//   const pauseTracking =
+//     async () => {
+
+//       pausedRef.current =
+//         true;
+
+//       setSessionFlag('paused');
+
+//       // Freeze elapsed time.
+//       endSegment();
+
+//       await callGlobalActivityAgent('pause');
+
+//       setIsPaused(
+//         true
+//       );
+
+//       clearCaptureTimers();
+
+//       setNextCaptureInSec(
+//         null
+//       );
+
+//       await syncTrackerTime();
+
+//       setLastStatus(
+//         'Tracking paused'
+//       );
+//     };
+
+//   // ====================================================
+//   // RESUME
+//   // ====================================================
+
+//   const resumeTracking =
+//     async () => {
+//       pausedRef.current =
+//         false;
+
+//       setSessionFlag('running');
+
+//       // Continue from the saved elapsed time.
+//       beginSegment();
+
+//       await callGlobalActivityAgent('resume');
+
+//       setIsPaused(
+//         false
+//       );
+
+//       scheduleRandomWindow(
+//         captureWindowRef.current,
+//         screenshotCountRef.current
+//       );
+
+//       setLastStatus(
+//         'Tracking resumed'
+//       );
+//     };
+
+//   // ====================================================
+//   // STOP
+//   // ====================================================
+
+//   const stopTracking =
+//     async () => {
+
+//       // Freeze elapsed time first, then save it.
+//       endSegment();
+
+//       if (muteTimerRef.current !== null) {
+//         window.clearTimeout(muteTimerRef.current);
+//         muteTimerRef.current = null;
+//       }
+
+//       setSessionFlag(null);
+
+//       await syncTrackerTime();
+//       await callGlobalActivityAgent('stop');
+
+//       trackingRef.current =
+//         false;
+
+//       pausedRef.current =
+//         false;
+
+//       setIsTracking(
+//         false
+//       );
+
+//       setIsPaused(
+//         false
+//       );
+
+//       clearCaptureTimers();
+
+//       setNextCaptureInSec(
+//         null
+//       );
+
+//       if (
+//         screenStreamRef.current
+//       ) {
+//         // Detach handlers first so manual Stop does not trigger an interruption.
+//         screenStreamRef.current
+//           .getTracks()
+//           .forEach(
+//             (
+//               track
+//             ) => {
+//               track.onended = null;
+//               track.onmute = null;
+//               track.onunmute = null;
+//               track.stop();
+//             }
+//           );
+
+//         screenStreamRef.current =
+//           null;
+//       }
+
+//       if (
+//         screenVideoRef.current
+//       ) {
+//         screenVideoRef.current.srcObject =
+//           null;
+//       }
+
+//       sessionSecondsRef.current = 0;
+
+//       setSessionSeconds(
+//         0
+//       );
+
+//       restoredSessionRef.current = false;
+
+//       setLastStatus(
+//         `Tracking stopped. Today: ${formatSecondsToHoursMinutes(
+//           daySecondsRef.current
+//         )}`
+//       );
+
+//       await loadDateHistory();
+//     };
+
+//   // ====================================================
+//   // RECONNECT SCREEN SHARING (after refresh / lock / sleep / interruption)
+//   // ====================================================
+
+//   // Reuses startTracking(): it opens the browser's screen chooser (must run
+//   // inside this click), restores the saved session/day seconds, restarts the
+//   // single timestamp timer, activity agent and screenshot schedule.
+//   const reconnectScreenSharing =
+//     async () => {
+//       if (reconnecting) return;
+
+//       setReconnecting(true);
+
+//       try {
+//         await startTracking();
+//       } finally {
+//         setReconnecting(false);
+//       }
+//     };
+
+//   // Employee chooses not to reconnect: keep saved time, stay stopped.
+//   const dismissReconnect =
+//     () => {
+//       setSessionFlag(null);
+//       setShowReconnectModal(false);
+
+//       setLastStatus(
+//         'Tracking stopped. Saved time is kept. Click Start Tracking to continue.'
+//       );
+
+//       void syncTrackerTime(daySecondsRef.current);
+//     };
+
+//   const handleLogout =
+//     () => {
+//       setSessionFlag(null);
+//       onLogout?.();
+//     };
+
+//   // ====================================================
+//   // CLEANUP
+//   // ====================================================
+
+//   useEffect(() => {
+//     return () => {
+
+//       clearCaptureTimers();
+
+//       if (muteTimerRef.current !== null) {
+//         window.clearTimeout(muteTimerRef.current);
+//         muteTimerRef.current = null;
+//       }
+
+//       if (
+//         trackerTimerRef.current
+//       ) {
+//         clearInterval(
+//           trackerTimerRef.current
+//         );
+//       }
+
+//       if (
+//         trackerSyncIntervalRef.current !== null
+//       ) {
+//         window.clearInterval(
+//           trackerSyncIntervalRef.current
+//         );
+
+//         trackerSyncIntervalRef.current =
+//           null;
+//       }
+
+//       if (
+//         screenStreamRef.current
+//       ) {
+//         screenStreamRef.current
+//           .getTracks()
+//           .forEach(
+//             (
+//               track
+//             ) =>
+//               track.stop()
+//           );
+//       }
+//     };
+//   }, []);
+
+//   // ====================================================
+//   // UI HELPERS
+//   // ====================================================
+
+//   const policyText =
+//     `${screenshotsPerWindow} screenshot${
+//       screenshotsPerWindow ===
+//       1
+//         ? ''
+//         : 's'
+//     } randomly / ${
+//       captureWindowSeconds <
+//       60
+//         ? `${captureWindowSeconds} sec`
+//         : `${Math.round(
+//             captureWindowSeconds /
+//               60
+//           )} min`
+//     }`;
+
+//   const today =
+//     getTodayDateKey();
+
+//   // ====================================================
+//   // RENDER
+//   // ====================================================
+
+//   return (
+//     <div className="w-full max-w-7xl mx-auto space-y-6">
+
+//       {/* HEADER */}
+
+//       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+
+//         <div className="flex items-center gap-3">
+
+//           <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+//             <Monitor className="w-6 h-6" />
+//           </div>
+
+//           <div>
+
+//             <h1 className="text-2xl font-bold">
+//               Employee Dashboard
+//             </h1>
+
+//             <div className="text-sm text-slate-500">
+//               {currentUser.name}
+//               {' • '}
+//               {currentUser.email}
+//             </div>
+
+//           </div>
+
+//         </div>
+
+//         {onLogout && (
+//           <button
+//             type="button"
+//             onClick={
+//               handleLogout
+//             }
+//             className="cursor-pointer px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
+//           >
+//             Logout
+//           </button>
+//         )}
+
+//       </div>
+
+//       {/* TRACKING CARD */}
+
+//       <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/20 p-6 space-y-5">
+
+//         <div>
+
+//           <label className="text-xs uppercase font-bold text-slate-500">
+//             Currently Working On
+//           </label>
+
+//           <input
+//             type="text"
+//             value={
+//               taskName
+//             }
+//             onChange={(
+//               event
+//             ) =>
+//               setTaskName(
+//                 event.target
+//                   .value
+//               )
+//             }
+//             className="mt-2 w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+//           />
+
+//         </div>
+
+//         {/* POLICY */}
+
+//         <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+
+//           <div className="flex flex-wrap items-center gap-2">
+
+//             <Camera className="w-4 h-4 text-indigo-600" />
+
+//             <span className="text-xs font-bold">
+//               Live Admin Capture Policy:
+//             </span>
+
+//             <span className="text-sm font-black text-indigo-600">
+//               {policyText}
+//             </span>
+
+//             <span className="px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+//               AUTO SYNC
+//             </span>
+
+//           </div>
+
+//           <div className="mt-2 text-[11px] text-slate-500">
+
+//             {capturePresetId ===
+//             'custom'
+//               ? 'Custom policy selected by Admin.'
+//               : 'Preset policy selected by Admin.'}
+
+//             {centralPolicyUpdatedAt
+//               ? ` Last updated: ${new Date(
+//                   centralPolicyUpdatedAt
+//                 ).toLocaleTimeString()}`
+//               : ''}
+
+//           </div>
+
+//         </div>
+
+//         {/* BUTTONS */}
+
+//         <div className="flex flex-col sm:flex-row gap-3">
+
+//           {!isTracking ? (
+//             <button
+//               type="button"
+//               onClick={
+//                 startTracking
+//               }
+//               className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+//             >
+//               <Play className="w-4 h-4" />
+
+//               Start Tracking
+//             </button>
+//           ) : (
+//             <>
+//               {!isPaused ? (
+//                 <button
+//                   type="button"
+//                   onClick={
+//                     pauseTracking
+//                   }
+//                   className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold"
+//                 >
+//                   <Pause className="w-4 h-4" />
+
+//                   Pause
+//                 </button>
+//               ) : (
+//                 <button
+//                   type="button"
+//                   onClick={
+//                     resumeTracking
+//                   }
+//                   className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+//                 >
+//                   <Play className="w-4 h-4" />
+
+//                   Resume
+//                 </button>
+//               )}
+
+//               <button
+//                 type="button"
+//                 onClick={
+//                   stopTracking
+//                 }
+//                 className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
+//               >
+//                 <Square className="w-4 h-4" />
+
+//                 Stop
+//               </button>
+//             </>
+//           )}
+
+//         </div>
+
+//         {/* CAPTURE COUNTDOWN */}
+
+//         {isTracking &&
+//           !isPaused &&
+//           nextCaptureInSec !==
+//             null && (
+//           <div className="text-xs text-center font-semibold text-slate-600 dark:text-slate-300">
+
+//             Next random screenshot in approximately{' '}
+
+//             <span className="font-mono text-indigo-600">
+//               {nextCaptureInSec}s
+//             </span>
+
+//           </div>
+//         )}
+
+//       </div>
+
+//       {/* SUMMARY */}
+
+//       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+
+//           <div className="text-[11px] uppercase font-bold text-slate-500">
+//             Current Task Duration
+//           </div>
+
+//           <div className="text-2xl font-black mt-2">
+//             {formatSecondsToHoursMinutes(
+//               sessionSeconds
+//             )}
+//           </div>
+
+//         </div>
+
+//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+
+//           <div className="text-[11px] uppercase font-bold text-slate-500">
+//             Today Total Tracked
+//           </div>
+
+//           <div className="text-2xl font-black mt-2 text-emerald-600">
+//             {formatSecondsToHoursMinutes(
+//               dayTotalSeconds
+//             )}
+//           </div>
+
+//         </div>
+
+//         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+
+//           <div className="text-[11px] uppercase font-bold text-slate-500">
+//             Selected Date Screenshots
+//           </div>
+
+//           <div className="text-2xl font-black mt-2 text-indigo-600">
+//             {selectedDateScreenshotCount}
+//           </div>
+
+//         </div>
+
+//       </div>
+
+//       {/* STATUS */}
+
+//       <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 flex items-start gap-2">
+
+//         {lastStatus.startsWith(
+//           '✅'
+//         ) ? (
+//           <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />
+//         ) : (
+//           <AlertCircle className="w-4 h-4 mt-0.5 text-indigo-600 shrink-0" />
+//         )}
+
+//         <div className="text-xs">
+
+//           {lastStatus}
+
+//           {lastCapturedTime && (
+//             <div className="text-slate-500 mt-1">
+//               Last screenshot:{' '}
+//               {lastCapturedTime}
+//             </div>
+//           )}
+
+//         </div>
+
+//       </div>
+
+//       {/* TIME & ACTIVITY REPORT (own data only) */}
+//       <TimeActivityReport
+//         title="My time and activity report"
+//         fileName={`work-report_${currentUser.name.replace(/\s+/g, '_')}`}
+//         allowMemberSelect={false}
+//         members={[
+//           {
+//             id: currentUser.id,
+//             name: currentUser.name,
+//             email: currentUser.email,
+//           },
+//         ]}
+//         loadHistory={async () => {
+//           const res = await fetch(
+//             `${backendUrl}/api/activity-history/${encodeURIComponent(currentUser.id)}`,
+//             { cache: 'no-store', headers: backendHeaders }
+//           );
+
+//           const data = await readApiJson(res);
+
+//           if (!res.ok || !data?.success) {
+//             throw new Error(data?.error || 'Failed to load history');
+//           }
+
+//           const records: ActivityHistoryRecord[] = (
+//             Array.isArray(data.records) ? data.records : []
+//           ).map((r: ActivityHistoryRecord) => ({ ...r }));
+
+//           const ensure = (dateKey: string) => {
+//             let rec = records.find((r) => r.dateKey === dateKey);
+
+//             if (!rec) {
+//               rec = {
+//                 dateKey,
+//                 totalSeconds: 0,
+//                 screenshotCount: 0,
+//               };
+//               records.push(rec);
+//             }
+
+//             return rec;
+//           };
+
+//           if (dayTotalSeconds > 0) {
+//             const rec = ensure(getTodayDateKey());
+//             rec.totalSeconds = Math.max(
+//               rec.totalSeconds,
+//               dayTotalSeconds
+//             );
+//           }
+
+//           if (selectedDateScreenshotCount > 0) {
+//             const rec = ensure(selectedDate);
+//             rec.screenshotCount = Math.max(
+//               rec.screenshotCount,
+//               selectedDateScreenshotCount
+//             );
+//           }
+
+//           return records;
+//         }}
+//       />
+
+//       {/* DATE HISTORY */}
+
+//       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+
+//         <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+
+//           <div>
+
+//             <h2 className="font-bold flex items-center gap-2">
+
+//               <Calendar className="w-5 h-5 text-indigo-600" />
+
+//               My Date-wise Work History
+
+//             </h2>
+
+//             <p className="text-xs text-slate-500 mt-1">
+//               Select a date to view actual tracked time and central screenshots.
+//             </p>
+
+//           </div>
+
+//           <div className="flex items-center gap-2">
+
+//             <input
+//               type="date"
+//               value={
+//                 selectedDate
+//               }
+//               max={
+//                 today
+//               }
+//               onChange={(
+//                 event
+//               ) =>
+//                 setSelectedDate(
+//                   event.target
+//                     .value ||
+//                     today
+//                 )
+//               }
+//               className="px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+//             />
+
+//             <button
+//               type="button"
+//               onClick={
+//                 loadDateHistory
+//               }
+//               className="cursor-pointer p-2 rounded-lg border border-slate-300 dark:border-slate-700"
+//               title="Refresh"
+//             >
+//               <RefreshCw className="w-4 h-4" />
+//             </button>
+
+//           </div>
+
+//         </div>
+
+//         <div className="p-5 space-y-5">
+
+//           {/* <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+//             <div className="rounded-xl p-4 bg-slate-50 dark:bg-slate-800">
+
+//               <div className="text-[11px] uppercase font-bold text-slate-500">
+//                 Selected Date
+//               </div>
+
+//               <div className="font-bold mt-1">
+//                 {selectedDate}
+//               </div>
+
+//             </div>
+
+//             <div className="rounded-xl p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+
+//               <div className="text-[11px] uppercase font-bold text-slate-500">
+//                 Actual Tracked Time
+//               </div>
+
+//               <div className="text-xl font-black mt-1 text-emerald-600">
+//                 {loadingHistory
+//                   ? 'Loading...'
+//                   : formatSecondsToHoursMinutes(
+//                       selectedDateSeconds
+//                     )}
+//               </div>
+
+//             </div>
+
+//             <div className="rounded-xl p-4 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+
+//               <div className="text-[11px] uppercase font-bold text-slate-500">
+//                 Screenshots
+//               </div>
+
+//               <div className="text-xl font-black mt-1 text-indigo-600">
+//                 {loadingHistory
+//                   ? '...'
+//                   : selectedDateScreenshotCount}
+//               </div>
+
+//             </div>
+
+//           </div> */}
+
+//           {/* YEAR > MONTH > DATE HISTORY */}
+
+//           {activityHistory.length > 0 && (
+//             <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+
+//               <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
+//                   Year
+//                 </div>
+
+//                 <div className="flex flex-wrap gap-2">
+//                   {historyYears.map((year) => (
+//                     <button
+//                       key={year}
+//                       type="button"
+//                       onClick={() => {
+//                         setSelectedHistoryYear(year);
+
+//                         const firstMonth = activityHistory
+//                           .filter((record) => record.dateKey.startsWith(`${year}-`))
+//                           .map((record) => record.dateKey.slice(0, 7))
+//                           .sort((a, b) => b.localeCompare(a))[0];
+
+//                         if (firstMonth) {
+//                           setSelectedHistoryMonth(firstMonth);
+//                         }
+//                       }}
+//                       className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
+//                         selectedHistoryYear === year
+//                           ? 'bg-indigo-600 text-white border-indigo-600'
+//                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
+//                       }`}
+//                     >
+//                       {year}
+//                     </button>
+//                   ))}
+//                 </div>
+//               </div>
+
+//               <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
+//                   Month
+//                 </div>
+
+//                 <div className="flex flex-wrap gap-2">
+//                   {historyMonths.map((month) => (
+//                     <button
+//                       key={month}
+//                       type="button"
+//                       onClick={() => setSelectedHistoryMonth(month)}
+//                       className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
+//                         selectedHistoryMonth === month
+//                           ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-400'
+//                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
+//                       }`}
+//                     >
+//                       {monthLabel(month)}
+//                     </button>
+//                   ))}
+//                 </div>
+//               </div>
+
+//               <div className="p-4">
+//                 <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
+//                   Dates
+//                 </div>
+
+//                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+//                   {filteredHistoryDates.map((record) => (
+//                     <button
+//                       key={record.dateKey}
+//                       type="button"
+//                       onClick={() => setSelectedDate(record.dateKey)}
+//                       className={`text-left rounded-xl border p-3 transition ${
+//                         selectedDate === record.dateKey
+//                           ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400'
+//                           : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400'
+//                       }`}
+//                     >
+//                       <div className="font-bold text-sm">
+//                         {new Date(`${record.dateKey}T00:00:00`).toLocaleDateString(
+//                           undefined,
+//                           { day: '2-digit', month: 'short', year: 'numeric' }
+//                         )}
+//                       </div>
+
+//                       <div className="text-[11px] text-slate-500 mt-1">
+//                         {formatSecondsToHoursMinutes(record.totalSeconds)}
+//                         {' • '}
+//                         {record.screenshotCount} screenshot{record.screenshotCount === 1 ? '' : 's'}
+//                       </div>
+//                     </button>
+//                   ))}
+//                 </div>
+//               </div>
+
+//             </div>
+//           )}
+
+//           {/* SCREENSHOTS */}
+
+//           <div>
+
+//             <div className="flex items-center justify-between gap-3 mb-4">
+
+//               <div>
+
+//                 <h3 className="font-bold flex items-center gap-2">
+
+//                   <Camera className="w-4 h-4 text-indigo-600" />
+
+//                   Screenshot History
+
+//                 </h3>
+
+//                 <div className="text-xs text-slate-500 mt-1">
+//                   {selectedDate}
+//                 </div>
+
+//               </div>
+
+//               <div className="text-xs font-bold text-indigo-600">
+//                 {
+//                   mergedScreenshots.length
+//                 }{' '}
+//                 captures
+//               </div>
+
+//             </div>
+
+//             {mergedScreenshots.length ===
+//             0 ? (
+//               <div className="py-14 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
+
+//                 <Camera className="w-10 h-10 mx-auto text-slate-400 mb-2" />
+
+//                 <div className="text-sm font-semibold">
+//                   No screenshots found
+//                 </div>
+
+//                 <div className="text-xs text-slate-500 mt-1">
+//                   No central screenshots are available for {selectedDate}.
+//                 </div>
+
+//               </div>
+//             ) : (
+//               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+//                 {pagedScreenshots.map(
+//                   (
+//                     screenshot
+//                   ) => (
+//                     <button
+//                       key={
+//                         screenshot.id
+//                       }
+//                       type="button"
+//                       onClick={() =>
+//                         setPreviewModal(
+//                           screenshot
+//                         )
+//                       }
+//                       className="cursor-pointer text-left rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:border-indigo-400 transition"
+//                     >
+
+//                       {(() => {
+//                         const source =
+//                           screenshot.driveThumbnailLink ||
+//                           screenshot.previewDataUrl ||
+//                           '';
+
+//                         const displayUrl =
+//                           employeeScreenshotUrls[source] ||
+//                           (source.startsWith('data:') || source.startsWith('blob:')
+//                             ? source
+//                             : '');
+
+//                         return displayUrl ? (
+//                           <img
+//                             src={displayUrl}
+//                             alt="Screenshot"
+//                             className="w-full aspect-video object-cover bg-slate-950"
+//                           />
+//                         ) : (
+//                           <div className="w-full aspect-video bg-slate-950 flex items-center justify-center text-xs text-slate-400">
+//                             Loading screenshot...
+//                           </div>
+//                         );
+//                       })()}
+
+//                       <div className="p-3">
+
+//                         <div className="text-xs font-bold">
+//                           {
+//                             screenshot.taskName
+//                           }
+//                         </div>
+
+//                         <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+
+//                           <Clock className="w-3 h-3" />
+
+//                           {screenshot.timeFormatted ||
+//                             'Saved capture'}
+
+//                         </div>
+
+//                         {(() => {
+//                           const counts = (
+//                             screenshot as ScreenshotLog & {
+//                               activityCounts?: ScreenshotActivityCounts;
+//                             }
+//                           ).activityCounts;
+
+//                           const activityPercent = Math.min(
+//                             100,
+//                             Math.max(0, Number(counts?.activityPercent) || 0)
+//                           );
+
+//                           const activityColor =
+//                             activityPercent === 0
+//                               ? 'bg-slate-400'
+//                               : activityPercent <= 25
+//                                 ? 'bg-red-500'
+//                                 : activityPercent <= 55
+//                                   ? 'bg-orange-500'
+//                                   : 'bg-green-500';
+
+//                           const activityTextColor =
+//                             activityPercent === 0
+//                               ? 'text-slate-500'
+//                               : activityPercent <= 25
+//                                 ? 'text-red-500'
+//                                 : activityPercent <= 55
+//                                   ? 'text-orange-500'
+//                                   : 'text-green-600';
+
+//                           return (
+//                             <div className="mt-3">
+//                               <div className="mb-1 flex items-center justify-between">
+//                                 <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+//                                   Activity
+//                                 </span>
+//                                 <span className={`text-xs font-bold ${activityTextColor}`}>
+//                                   {activityPercent}%
+//                                 </span>
+//                               </div>
+
+//                               <div
+//                                 className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
+//                                 role="progressbar"
+//                                 aria-label="Screenshot activity"
+//                                 aria-valuemin={0}
+//                                 aria-valuemax={100}
+//                                 aria-valuenow={activityPercent}
+//                               >
+//                                 <div
+//                                   className={`h-full rounded-full transition-all duration-300 ${activityColor}`}
+//                                   style={{ width: `${activityPercent}%` }}
+//                                 />
+//                               </div>
+
+//                               <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
+//                                 <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+//                                   <div className="font-semibold">Mouse moves</div>
+//                                   <div>{counts?.mouseMoves ?? 0}</div>
+//                                 </div>
+
+//                                 <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+//                                   <div className="font-semibold">Clicks</div>
+//                                   <div>{counts?.mouseClicks ?? 0}</div>
+//                                 </div>
+
+//                                 <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+//                                   <div className="font-semibold">Key presses</div>
+//                                   <div>{counts?.keyPresses ?? 0}</div>
+//                                 </div>
+//                               </div>
+//                             </div>
+//                           );
+//                         })()}
+
+//                       </div>
+
+//                     </button>
+//                   )
+//                 )}
+
+//               </div>
+//             )}
 
 
+//             <PaginationControls
+//               page={screenshotPagination.page}
+//               totalPages={screenshotPagination.totalPages}
+//               totalItems={screenshotPagination.totalItems}
+//               firstItemNumber={screenshotPagination.firstItemNumber}
+//               lastItemNumber={screenshotPagination.lastItemNumber}
+//               onPageChange={screenshotPagination.setPage}
+//             />
 
+//           </div>
 
+//         </div>
 
+//       </div>
 
+//       {/* PREVIEW */}
 
+//       {previewModal && (
+//         <div
+//           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+//           onClick={() =>
+//             setPreviewModal(
+//               null
+//             )
+//           }
+//         >
 
+//           <div
+//             className="w-full max-w-6xl"
+//             onClick={(
+//               event
+//             ) =>
+//               event.stopPropagation()
+//             }
+//           >
 
+//             <div className="flex justify-end mb-2">
 
+//               <button
+//                 type="button"
+//                 onClick={() =>
+//                   setPreviewModal(
+//                     null
+//                   )
+//                 }
+//                 className="cursor-pointer p-2 text-white"
+//               >
+//                 <X className="w-6 h-6" />
+//               </button>
 
+//             </div>
 
+//             <div className="bg-white dark:bg-slate-900 rounded-xl overflow-hidden">
 
+//               {(() => {
+//                 const source =
+//                   previewModal.driveThumbnailLink ||
+//                   previewModal.previewDataUrl ||
+//                   '';
 
+//                 const displayUrl =
+//                   employeeScreenshotUrls[source] ||
+//                   (source.startsWith('data:') || source.startsWith('blob:')
+//                     ? source
+//                     : '');
+
+//                 return displayUrl ? (
+//                   <img
+//                     src={displayUrl}
+//                     alt="Screenshot preview"
+//                     className="w-full max-h-[80vh] object-contain bg-slate-950"
+//                   />
+//                 ) : (
+//                   <div className="min-h-[320px] flex items-center justify-center bg-slate-950 text-slate-400">
+//                     Loading screenshot...
+//                   </div>
+//                 );
+//               })()}
+
+//               <div className="p-4">
+
+//                 <div className="font-bold">
+//                   {
+//                     previewModal.taskName
+//                   }
+//                 </div>
+
+//                 <div className="text-xs text-slate-500 mt-1">
+//                   {
+//                     previewModal.timeFormatted
+//                   }
+//                 </div>
+
+//               </div>
+
+//             </div>
+
+//           </div>
+
+//         </div>
+//       )}
+
+//       {/* RECONNECT SCREEN SHARING POPUP (refresh / lock / sleep / interruption) */}
+
+//       {showReconnectModal && !isTracking && (
+//         <div
+//           className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+//           role="dialog"
+//           aria-modal="true"
+//           aria-labelledby="wm-reconnect-title"
+//         >
+
+//           <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-center shadow-2xl">
+
+//             <div className="mx-auto w-14 h-14 rounded-full bg-indigo-100 dark:bg-indigo-950 flex items-center justify-center">
+//               <Monitor className="w-6 h-6 text-indigo-600" />
+//             </div>
+
+//             <h2
+//               id="wm-reconnect-title"
+//               className="mt-4 text-xl font-black"
+//             >
+//               {RECONNECT_POPUP_TITLE}
+//             </h2>
+
+//             <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+//               {reconnectMessage}
+//             </p>
+
+//             <button
+//               type="button"
+//               onClick={reconnectScreenSharing}
+//               disabled={reconnecting}
+//               className="cursor-pointer mt-5 w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold"
+//             >
+//               <Monitor className="w-4 h-4" />
+
+//               Choose screen &amp; reconnect
+//             </button>
+
+//             <p className="mt-3 text-[11px] text-slate-500">
+//               Browser security requires you to click this button before the
+//               screen-sharing chooser can open.
+//             </p>
+
+//             <button
+//               type="button"
+//               onClick={dismissReconnect}
+//               className="cursor-pointer mt-3 text-[11px] text-slate-500 underline"
+//             >
+//               Stop for now (saved time is kept)
+//             </button>
+
+//           </div>
+
+//         </div>
+//       )}
+
+//       {/* HIDDEN VIDEO */}
+
+//       <video
+//         ref={
+//           screenVideoRef
+//         }
+//         autoPlay
+//         muted
+//         playsInline
+//         className="fixed -top-[9999px] -left-[9999px] w-[320px] h-[180px] opacity-[0.001] pointer-events-none"
+//       />
+
+//     </div>
+//   );
+// };
+import { TimeActivityReport } from './TimeActivityReport';
+import { PaginationControls, usePagination } from './ScreenshotPagination';
+import { MyTimeTracking, type ViewMode } from './MyTimeTracking';
+import { EmployeeForgottenTime } from './ForgottenTime';
+import { ScheduleAlertsManager } from './ScheduleAlerts';
 
 import React, {
   useEffect,
@@ -9709,6 +7860,9 @@ import {
   AlertCircle,
   X,
   CheckCircle2,
+  Home,
+  FileText,
+  Bell,
 } from 'lucide-react';
 
 import {
@@ -9747,7 +7901,7 @@ const callGlobalActivityAgent = async (
 ): Promise<Partial<ScreenshotActivityCounts> | null> => {
   try {
     const response = await fetch(`${GLOBAL_AGENT_URL}/${action}`, {
-      method: action === 'snapshot' ? 'POST' : 'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
       cache: 'no-store',
@@ -9770,6 +7924,33 @@ const getBackendUrl = (): string => {
 
   return 'https://codesdot-workmonitor.work-nest.workers.dev';
 };
+
+// ====================================================
+// SCREEN SHARING RECONNECT (after page refresh / lock / sleep / interruption)
+// ====================================================
+
+const RECONNECT_POPUP_TITLE = 'Reconnect screen sharing';
+
+// Shown after an accidental page refresh. The timer is paused until reconnect.
+const RECONNECT_POPUP_MESSAGE =
+  "Your timer is paused and screenshots are stopped until you share your screen again. Your saved time is kept. Click below, then choose the screen in your browser's sharing window.";
+
+// Shown when the desktop was locked / the computer slept / screen sharing stopped.
+const RECONNECT_INTERRUPTED_MESSAGE =
+  'Your desktop was locked or screen sharing was interrupted. Please reconnect your screen to resume tracking.';
+
+const RECONNECT_VOICE_MESSAGE =
+  'Please reconnect your screen sharing to continue tracking.';
+
+const RECONNECT_REMINDER_MS = 60 * 1000;
+
+// If the page's 1-second heartbeat has not run for this long, the computer was
+// asleep / the page was suspended. Must stay ABOVE browser background-timer
+// throttling (~60 s) so ordinary tab switching never causes a false pause.
+const HEARTBEAT_GAP_MS = 120 * 1000;
+
+// A capture track must stay muted this long before it is treated as unavailable.
+const MUTE_GRACE_MS = 30 * 1000;
 
 // ====================================================
 // SCREENSHOT CLOUD UPLOAD WINDOW
@@ -9843,12 +8024,6 @@ const readApiJson = async (
 // TYPES
 // ======================================================
 
-// interface ScreenshotActivityCounts {
-//   mouseMoves: number;
-//   mouseClicks: number;
-//   keyPresses: number;
-// }
-
 interface ScreenshotActivityCounts {
   mouseMoves: number;
   mouseClicks: number;
@@ -9857,7 +8032,6 @@ interface ScreenshotActivityCounts {
   activeSeconds?: number;
   trackedSeconds?: number;
 }
-
 
 const getActivityStorageKey = (
   employeeId: string,
@@ -9878,22 +8052,17 @@ const readSavedActivityCounts = (
     if (!raw) return undefined;
 
     const parsed = JSON.parse(raw);
-    // return {
-    //   mouseMoves: Math.max(0, Number(parsed?.mouseMoves) || 0),
-    //   mouseClicks: Math.max(0, Number(parsed?.mouseClicks) || 0),
-    //   keyPresses: Math.max(0, Number(parsed?.keyPresses) || 0),
-    // };
     return {
-  mouseMoves: Math.max(0, Number(parsed?.mouseMoves) || 0),
-  mouseClicks: Math.max(0, Number(parsed?.mouseClicks) || 0),
-  keyPresses: Math.max(0, Number(parsed?.keyPresses) || 0),
-  activityPercent: Math.min(
-    100,
-    Math.max(0, Number(parsed?.activityPercent) || 0)
-  ),
-  activeSeconds: Math.max(0, Number(parsed?.activeSeconds) || 0),
-  trackedSeconds: Math.max(0, Number(parsed?.trackedSeconds) || 0),
-};
+      mouseMoves: Math.max(0, Number(parsed?.mouseMoves) || 0),
+      mouseClicks: Math.max(0, Number(parsed?.mouseClicks) || 0),
+      keyPresses: Math.max(0, Number(parsed?.keyPresses) || 0),
+      activityPercent: Math.min(
+        100,
+        Math.max(0, Number(parsed?.activityPercent) || 0)
+      ),
+      activeSeconds: Math.max(0, Number(parsed?.activeSeconds) || 0),
+      trackedSeconds: Math.max(0, Number(parsed?.trackedSeconds) || 0),
+    };
   } catch {
     return undefined;
   }
@@ -9919,7 +8088,35 @@ interface ActivityHistoryRecord {
   dateKey: string;
   totalSeconds: number;
   screenshotCount: number;
+  approvedSeconds?: number;
 }
+
+// ======================================================
+// DASHBOARD TABS (navigation only - no tracking logic lives here)
+// ======================================================
+
+type EmployeeTab =
+  | 'dashboard'
+  | 'reports'
+  | 'history'
+  | 'forgotten'
+  | 'alerts';
+
+// The old Year > Month > Dates picker is replaced by My Time Tracking.
+// Set to true to show it again.
+const SHOW_LEGACY_DATE_NAVIGATOR = false;
+
+const EMPLOYEE_TABS: {
+  id: EmployeeTab;
+  label: string;
+  icon: React.ElementType;
+}[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: Home },
+  { id: 'reports', label: 'Activity Reports', icon: FileText },
+  { id: 'history', label: 'Date-wise Work History', icon: Calendar },
+  { id: 'forgotten', label: 'Forgotten Time', icon: Clock },
+  { id: 'alerts', label: 'Schedule Alerts', icon: Bell },
+];
 
 interface EmployeeDashboardProps {
   currentUser: AppUser;
@@ -9998,10 +8195,35 @@ export const EmployeeDashboard:
   ] =
     useState(false);
 
-    const [
-  showReconnectModal,
-  setShowReconnectModal,
-] = useState(false);
+  const [
+    showReconnectModal,
+    setShowReconnectModal,
+  ] = useState(false);
+
+  const [
+    reconnecting,
+    setReconnecting,
+  ] = useState(false);
+
+  // UI only: which section is visible. Never touches tracking state.
+  const [
+    activeTab,
+    setActiveTab,
+  ] = useState<EmployeeTab>('dashboard');
+
+  // My Time Tracking: Day / Week / Month / All. View only: it never touches
+  // the timer, screen sharing, capture or the current task.
+  const [historyViewMode, setHistoryViewMode] =
+    useState<ViewMode>('day');
+
+  // Stops a slow, older history response from overwriting a newer date.
+  const historyRequestRef = useRef(0);
+
+  // Message shown in the (existing) reconnect popup.
+  const [
+    reconnectMessage,
+    setReconnectMessage,
+  ] = useState(RECONNECT_POPUP_MESSAGE);
 
   const [
     sessionSeconds,
@@ -10095,7 +8317,7 @@ export const EmployeeDashboard:
     >([]);
 
   const [
-    selectedDateSeconds,
+    ,
     setSelectedDateSeconds,
   ] =
     useState(0);
@@ -10127,7 +8349,6 @@ export const EmployeeDashboard:
     useState<
       ScreenshotLog | null
     >(null);
-
 
   // ====================================================
   // YEAR / MONTH HISTORY NAVIGATION
@@ -10236,7 +8457,7 @@ export const EmployeeDashboard:
       number | null
     >(null);
 
-  // Central D1 tracker sync runs only once per minute while actively tracking.
+  // Kept only so the cleanup effect below stays valid.
   const trackerSyncIntervalRef =
     useRef<
       number | null
@@ -10251,8 +8472,37 @@ export const EmployeeDashboard:
   const daySecondsRef =
     useRef(0);
 
-  // When a tracking session survives a page refresh, keep the saved
-  // session duration so the next Start action resumes it instead of
+  // ---- Timestamp based timer (single source of truth) ----
+  // elapsed = base seconds (saved) + (Date.now() - segment start)
+  const sessionSecondsRef =
+    useRef(0);
+
+  const baseDayRef =
+    useRef(0);
+
+  const baseSessionRef =
+    useRef(0);
+
+  const segmentStartRef =
+    useRef<number | null>(null);
+
+  // Last time the 1-second heartbeat ran. A large gap means the computer was
+  // asleep / the page was suspended; that period is never counted as work.
+  const lastHeartbeatRef =
+    useRef(Date.now());
+
+  // Pending "track stayed muted" timer (screen capture unavailable).
+  const muteTimerRef =
+    useRef<number | null>(null);
+
+  // True once the page is being unloaded/refreshed. The browser may end the
+  // screen-share track during unload; that must not clear the "was tracking"
+  // marker that drives the reconnect popup.
+  const unloadingRef =
+    useRef(false);
+
+  // When a tracking session survives a page refresh (or an interruption), keep
+  // the saved session duration so the next Start action resumes it instead of
   // resetting the current task to zero.
   const restoredSessionRef =
     useRef(false);
@@ -10289,11 +8539,10 @@ export const EmployeeDashboard:
   ]);
 
   useEffect(() => {
-    daySecondsRef.current =
-      dayTotalSeconds;
-  }, [
-    dayTotalSeconds,
-  ]);
+    if (dayTotalSeconds > daySecondsRef.current) {
+      daySecondsRef.current = dayTotalSeconds;
+    }
+  }, [dayTotalSeconds]);
 
   useEffect(() => {
     captureWindowRef.current =
@@ -10343,93 +8592,94 @@ export const EmployeeDashboard:
     `${currentUser.id}_` +
     `${getTodayDateKey()}`;
 
-  // Restore browser timer
+  // Separate marker: was tracking active (running/paused) when the page closed?
+  // Stored apart from the timer data so the timer save effect cannot overwrite it.
+  const sessionFlagKey =
+    `wm_emp_active_` +
+    `${currentUser.id}_` +
+    `${getTodayDateKey()}`;
+
+  const setSessionFlag = (
+    value: 'running' | 'paused' | null
+  ) => {
+    try {
+      if (value) {
+        localStorage.setItem(sessionFlagKey, value);
+      } else {
+        localStorage.removeItem(sessionFlagKey);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Restore browser timer (state AND refs)
   useEffect(() => {
     try {
-      const raw =
-        localStorage.getItem(
-          timerStorageKey
-        );
+      const raw = localStorage.getItem(timerStorageKey);
+      if (!raw) return;
 
-      if (!raw) {
-        return;
+      const saved = JSON.parse(raw);
+      const savedDay = Math.max(0, Number(saved?.dayTotalSeconds) || 0);
+      const savedSession = Math.max(0, Number(saved?.sessionSeconds) || 0);
+
+      if (savedDay > daySecondsRef.current) {
+        daySecondsRef.current = savedDay;
+        setDayTotalSeconds(savedDay);
       }
 
-      const saved =
-        JSON.parse(raw);
+      sessionSecondsRef.current = savedSession;
+      setSessionSeconds(savedSession);
 
-      if (
-        typeof saved
-          ?.dayTotalSeconds ===
-        'number'
-      ) {
-        setDayTotalSeconds(
-          Math.max(
-            0,
-            saved
-              .dayTotalSeconds
-          )
+      if (savedSession > 0) {
+        restoredSessionRef.current = true;
+        setLastStatus(
+          'Previous tracking time restored. Click Start Tracking to continue.'
         );
       }
 
-      if (
-        typeof saved
-          ?.sessionSeconds ===
-        'number'
-      ) {
-        const restoredSessionSeconds = Math.max(
-          0,
-          saved.sessionSeconds
-        );
-
-        setSessionSeconds(
-          restoredSessionSeconds
-        );
-
-        if (
-          saved?.isTracking &&
-          restoredSessionSeconds > 0
-        ) {
-          restoredSessionRef.current = true;
-          setLastStatus(
-            'Previous tracking time restored. Click Start Tracking to continue.'
-          );
-        }
+      if (saved?.taskName) {
+        setTaskName(saved.taskName);
       }
-
-      if (
-        saved?.taskName
-      ) {
-        setTaskName(
-          saved.taskName
-        );
-      }
-    } catch (
-      error
-    ) {
-      console.warn(
-        'Timer restore warning:',
-        error
-      );
+    } catch (error) {
+      console.warn('Timer restore warning:', error);
     }
-  }, [
-    timerStorageKey,
-  ]);
+  }, [timerStorageKey]);
+
+  // Page refreshed while tracking was running -> ask to reconnect screen sharing.
+  // (Declared after the restore effect so its status message wins.)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(sessionFlagKey) !== 'running') return;
+
+      restoredSessionRef.current = true;
+      setReconnectMessage(RECONNECT_POPUP_MESSAGE);
+      setShowReconnectModal(true);
+      setLastStatus(
+        'Page refreshed. Timer paused. Reconnect screen sharing to resume tracking and screenshots.'
+      );
+    } catch {
+      // ignore
+    }
+  }, [sessionFlagKey]);
 
   // Save timer
   useEffect(() => {
+    // Never overwrite saved time with the initial zeros on mount.
+    if (!isTracking && dayTotalSeconds === 0 && sessionSeconds === 0) {
+      return;
+    }
+
     try {
       localStorage.setItem(
         timerStorageKey,
-
         JSON.stringify({
           dayTotalSeconds,
           sessionSeconds,
           taskName,
           isTracking,
           isPaused,
-          updatedAt:
-            Date.now(),
+          updatedAt: Date.now(),
         })
       );
     } catch {
@@ -10521,121 +8771,320 @@ export const EmployeeDashboard:
     };
 
   // ====================================================
-  // TIMER
+  // TIMER (single source of truth: timestamps)
   // ====================================================
 
-  useEffect(() => {
-    if (
-      isTracking &&
-      !isPaused
-    ) {
-      trackerTimerRef.current =
-        window.setInterval(
-          () => {
-            setSessionSeconds(
-              (
-                previous
-              ) =>
-                previous +
-                1
-            );
-
-            setDayTotalSeconds(
-              (
-                previous
-              ) =>
-                previous +
-                1
-            );
-          },
-          1000
-        );
-    } else {
-      if (
-        trackerTimerRef.current
-      ) {
-        clearInterval(
-          trackerTimerRef.current
-        );
-
-        trackerTimerRef.current =
-          null;
-      }
+  const readClock = () => {
+    if (segmentStartRef.current === null) {
+      return {
+        day: daySecondsRef.current,
+        session: sessionSecondsRef.current,
+      };
     }
 
-    return () => {
-      if (
-        trackerTimerRef.current
-      ) {
-        clearInterval(
-          trackerTimerRef.current
-        );
-      }
+    const delta = Math.max(
+      0,
+      Math.floor((Date.now() - segmentStartRef.current) / 1000)
+    );
+
+    return {
+      day: baseDayRef.current + delta,
+      session: baseSessionRef.current + delta,
     };
-  }, [
-    isTracking,
-    isPaused,
-  ]);
+  };
 
-  // ====================================================
-  // PERIODIC CENTRAL TRACKER SYNC
-  // ====================================================
-  // Keep Cloudflare D1 updated while the employee is working.
-  // This runs once every 60 seconds only while actively tracking.
-  // It does not poll while paused or stopped.
+  const applyClock = () => {
+    const { day, session } = readClock();
 
-  useEffect(() => {
-    if (
-      !isTracking ||
-      isPaused
-    ) {
-      if (
-        trackerSyncIntervalRef.current !== null
-      ) {
-        window.clearInterval(
-          trackerSyncIntervalRef.current
-        );
+    daySecondsRef.current = day;
+    sessionSecondsRef.current = session;
 
-        trackerSyncIntervalRef.current =
-          null;
-      }
+    setDayTotalSeconds(day);
+    setSessionSeconds(session);
 
-      return;
+    return day;
+  };
+
+  const beginSegment = () => {
+    baseDayRef.current = daySecondsRef.current;
+    baseSessionRef.current = sessionSecondsRef.current;
+    segmentStartRef.current = Date.now();
+    lastHeartbeatRef.current = Date.now();
+  };
+
+  const endSegment = () => {
+    const day = applyClock();
+    segmentStartRef.current = null;
+    return day;
+  };
+
+  // Freeze the clock at a past timestamp. Time after `ts` is discarded, so the
+  // locked / sleeping period is never counted. Saved time is preserved.
+  const freezeAt = (ts: number) => {
+    if (segmentStartRef.current === null) return daySecondsRef.current;
+
+    const delta = Math.max(
+      0,
+      Math.floor((Math.min(ts, Date.now()) - segmentStartRef.current) / 1000)
+    );
+
+    const day = baseDayRef.current + delta;
+    const session = baseSessionRef.current + delta;
+
+    daySecondsRef.current = day;
+    sessionSecondsRef.current = session;
+
+    setDayTotalSeconds(day);
+    setSessionSeconds(session);
+
+    segmentStartRef.current = null;
+
+    return day;
+  };
+
+  const isStreamLive = (stream: MediaStream | null | undefined) => {
+    const track = stream?.getVideoTracks()[0];
+    return !!stream && stream.active && !!track && track.readyState === 'live';
+  };
+
+  // Pause tracking because the desktop was locked / the computer slept / the
+  // screen share became unavailable. Reuses the existing reconnect popup,
+  // reminders and startTracking() recovery (same state as page refresh).
+  // Idempotent: duplicate triggers (ended + gap + mute) are ignored.
+  const interruptTracking = (frozenAt?: number) => {
+    if (!trackingRef.current) return;
+
+    trackingRef.current = false;
+    pausedRef.current = false;
+
+    const finalSeconds =
+      frozenAt === undefined ? endSegment() : freezeAt(frozenAt);
+
+    clearCaptureTimers();
+
+    if (muteTimerRef.current !== null) {
+      window.clearTimeout(muteTimerRef.current);
+      muteTimerRef.current = null;
     }
 
-    // The Start action already performs the initial sync.
-    // The interval handles subsequent updates.
-    trackerSyncIntervalRef.current =
-      window.setInterval(
-        () => {
-          if (
-            trackingRef.current &&
-            !pausedRef.current
-          ) {
-            void syncTrackerTime(
-              daySecondsRef.current
-            );
-          }
-        },
-        60 * 1000
-      );
+    setNextCaptureInSec(null);
+
+    // Keep the saved session so reconnect resumes it (never resets to 0).
+    restoredSessionRef.current = true;
+    setSessionFlag('running');
+
+    setIsTracking(false);
+    setIsPaused(false);
+
+    setReconnectMessage(RECONNECT_INTERRUPTED_MESSAGE);
+    setShowReconnectModal(true);
+
+    setLastStatus(
+      'Tracking paused: desktop locked or screen sharing interrupted. Reconnect screen sharing to resume.'
+    );
+
+    void callGlobalActivityAgent('pause');
+    void syncTrackerTime(finalSeconds);
+  };
+
+  // Returns true if tracking was interrupted because the page was not running
+  // (sleep / long suspension). Only time up to the last heartbeat is counted.
+  const checkHeartbeatGap = () => {
+    if (
+      !trackingRef.current ||
+      pausedRef.current ||
+      segmentStartRef.current === null
+    ) {
+      return false;
+    }
+
+    const now = Date.now();
+    const last = lastHeartbeatRef.current;
+
+    if (now - last > HEARTBEAT_GAP_MS) {
+      interruptTracking(last);
+      return true;
+    }
+
+    lastHeartbeatRef.current = now;
+    return false;
+  };
+
+  // UI tick (display only; elapsed is always computed from timestamps).
+  // Still ONE interval. Visibility/focus events only run the gap check; they
+  // never pause tracking by themselves, so tab switching causes no false pause.
+  useEffect(() => {
+    if (!isTracking || isPaused) return;
+
+    const tick = () => {
+      if (!checkHeartbeatGap()) applyClock();
+    };
+
+    const id = window.setInterval(tick, 1000);
+
+    const onWake = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+
+    document.addEventListener('visibilitychange', onWake);
+    document.addEventListener('resume', onWake);
+    window.addEventListener('focus', onWake);
 
     return () => {
-      if (
-        trackerSyncIntervalRef.current !== null
-      ) {
-        window.clearInterval(
-          trackerSyncIntervalRef.current
-        );
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onWake);
+      document.removeEventListener('resume', onWake);
+      window.removeEventListener('focus', onWake);
+    };
+  }, [isTracking, isPaused]);
 
-        trackerSyncIntervalRef.current =
-          null;
+  // Backend sync every 30 seconds while actively tracking
+  useEffect(() => {
+    if (!isTracking || isPaused) return;
+
+    const id = window.setInterval(() => {
+      if (trackingRef.current && !pausedRef.current) {
+        // Never post sleep/lock time to the backend.
+        if (checkHeartbeatGap()) return;
+        void syncTrackerTime(readClock().day);
+      }
+    }, 30000);
+
+    return () => window.clearInterval(id);
+  }, [isTracking, isPaused]);
+
+  // Best-effort sync when the page is reloaded/closed
+  useEffect(() => {
+    const onShow = () => {
+      unloadingRef.current = false;
+    };
+
+    const onHide = () => {
+      unloadingRef.current = true;
+
+      if (!trackingRef.current) return;
+
+      try {
+        void fetch(`${backendUrl}/api/tracker-time`, {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employeeId: currentUser.id,
+            employeeName: currentUser.name,
+            dateKey: getTodayDateKey(),
+            totalSeconds: readClock().day,
+          }),
+        });
+      } catch {
+        // ignore
       }
     };
-  }, [
-    isTracking,
-    isPaused,
-  ]);
+
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('pageshow', onShow);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('pageshow', onShow);
+    };
+  }, [backendUrl, currentUser.id, currentUser.name]);
+
+  // Reminders while the reconnect popup is open (every 60s, never overlapping):
+  //  1) voice            - Chrome may block it until the page has had a click
+  //  2) desktop notification - works when this tab/window is in the background
+  //  3) tab title flash  - visible in the tab strip
+  useEffect(() => {
+    if (!showReconnectModal || isTracking) return;
+
+    const originalTitle = document.title;
+    let flashOn = false;
+    let activeNotification: Notification | null = null;
+
+    const speak = () => {
+      try {
+        if (!('speechSynthesis' in window)) return;
+
+        const synth = window.speechSynthesis;
+
+        // Avoid overlapping reminders.
+        if (synth.speaking || synth.pending) return;
+
+        const utterance = new SpeechSynthesisUtterance(
+          RECONNECT_VOICE_MESSAGE
+        );
+        utterance.rate = 1;
+        utterance.volume = 1;
+        synth.speak(utterance);
+      } catch {
+        // Browser may block speech until the page has had a user interaction.
+      }
+    };
+
+    const notify = () => {
+      try {
+        if (
+          !('Notification' in window) ||
+          Notification.permission !== 'granted'
+        ) {
+          return;
+        }
+
+        // Same tag replaces the previous alert, so they never pile up.
+        activeNotification?.close();
+
+        const notification = new Notification(RECONNECT_POPUP_TITLE, {
+          body: RECONNECT_VOICE_MESSAGE,
+          tag: 'wm-reconnect',
+          requireInteraction: true,
+          renotify: true,
+        } as NotificationOptions & { renotify?: boolean });
+
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+
+        activeNotification = notification;
+      } catch {
+        // ignore
+      }
+    };
+
+    const remind = () => {
+      speak();
+      notify();
+    };
+
+    const reminderId = window.setInterval(remind, RECONNECT_REMINDER_MS);
+
+    // Flash the tab title so the employee notices it from another tab.
+    const flashId = window.setInterval(() => {
+      flashOn = !flashOn;
+      document.title = flashOn
+        ? '⚠ Reconnect screen sharing'
+        : originalTitle;
+    }, 1000);
+
+    return () => {
+      window.clearInterval(reminderId);
+      window.clearInterval(flashId);
+      document.title = originalTitle;
+
+      try {
+        activeNotification?.close();
+      } catch {
+        // ignore
+      }
+
+      try {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }, [showReconnectModal, isTracking]);
 
   // ====================================================
   // SCREEN SHARE
@@ -10646,27 +9095,33 @@ export const EmployeeDashboard:
       try {
         if (
           !window.isSecureContext ||
-          !navigator
-            .mediaDevices ||
-          typeof navigator
-            .mediaDevices
-            .getDisplayMedia !==
-            'function'
+          !navigator.mediaDevices ||
+          typeof navigator.mediaDevices.getDisplayMedia !== 'function'
         ) {
           throw new Error(
             'Screen capture requires HTTPS.'
           );
         }
 
-        if (
-          screenStreamRef
-            .current
-            ?.active
-        ) {
-          return (
-            screenStreamRef
-              .current
-          );
+        // Reuse the existing stream only if it is genuinely live and not muted.
+        // Otherwise drop it and ask for a fresh one (this runs inside a click).
+        const existing = screenStreamRef.current;
+
+        if (existing) {
+          const existingTrack = existing.getVideoTracks()[0];
+
+          if (isStreamLive(existing) && existingTrack && !existingTrack.muted) {
+            return existing;
+          }
+
+          existing.getTracks().forEach((track) => {
+            track.onended = null;
+            track.onmute = null;
+            track.onunmute = null;
+            track.stop();
+          });
+
+          screenStreamRef.current = null;
         }
 
         let stream:
@@ -10705,7 +9160,15 @@ export const EmployeeDashboard:
                 preferCurrentTab:
                   false,
               } as any);
-        } catch {
+        } catch (firstError: any) {
+          // The employee cancelled the chooser: do NOT open a second one.
+          if (
+            firstError?.name === 'NotAllowedError' ||
+            firstError?.name === 'AbortError'
+          ) {
+            throw firstError;
+          }
+
           stream =
             await navigator
               .mediaDevices
@@ -10723,34 +9186,61 @@ export const EmployeeDashboard:
             0
           ];
 
-        if (
-          videoTrack
-        ) {
-          videoTrack.onended =
-            () => {
-              screenStreamRef.current =
+        // Verify the returned stream is valid before using it.
+        if (!videoTrack || videoTrack.readyState !== 'live') {
+          stream.getTracks().forEach((track) => track.stop());
+
+          throw new Error(
+            'The selected screen is not available. Please try again.'
+          );
+        }
+
+        videoTrack.onended =
+          () => {
+            screenStreamRef.current =
+              null;
+
+            if (
+              screenVideoRef.current
+            ) {
+              screenVideoRef.current.srcObject =
                 null;
+            }
+
+            // Pause (not stop): keep saved time, open the existing reconnect
+            // popup. interruptTracking also keeps the "running" marker, which
+            // is exactly what the refresh flow needs after reload.
+            interruptTracking();
+          };
+
+        // A capture track that stays muted is treated as unavailable.
+        videoTrack.onmute =
+          () => {
+            const mutedAt = Date.now();
+
+            if (muteTimerRef.current !== null) {
+              window.clearTimeout(muteTimerRef.current);
+            }
+
+            muteTimerRef.current = window.setTimeout(() => {
+              muteTimerRef.current = null;
 
               if (
-                screenVideoRef.current
+                videoTrack.muted &&
+                screenStreamRef.current?.getVideoTracks()[0] === videoTrack
               ) {
-                screenVideoRef.current.srcObject =
-                  null;
+                interruptTracking(mutedAt);
               }
+            }, MUTE_GRACE_MS);
+          };
 
-              setLastStatus(
-                'Screen sharing stopped. Start tracking again to continue.'
-              );
-
-              setIsTracking(
-                false
-              );
-
-              setIsPaused(
-                false
-              );
-            };
-        }
+        videoTrack.onunmute =
+          () => {
+            if (muteTimerRef.current !== null) {
+              window.clearTimeout(muteTimerRef.current);
+              muteTimerRef.current = null;
+            }
+          };
 
         screenStreamRef.current =
           stream;
@@ -10905,10 +9395,19 @@ export const EmployeeDashboard:
           'Capturing screenshot...'
         );
 
-        const stream =
-          await initScreenStream();
+        // If the computer slept since the last heartbeat, pause instead.
+        if (checkHeartbeatGap()) {
+          return;
+        }
 
-        if (!stream) {
+        // Scheduled captures must NEVER call getDisplayMedia (it needs a user
+        // click). Use only the existing live stream; otherwise pause and ask
+        // the employee to reconnect.
+        const stream =
+          screenStreamRef.current;
+
+        if (!stream || !isStreamLive(stream)) {
+          interruptTracking();
           return;
         }
 
@@ -10918,6 +9417,16 @@ export const EmployeeDashboard:
           );
 
         if (!canvas) {
+          return;
+        }
+
+        // Tracking was interrupted while the frame was being grabbed:
+        // drop it so no black / invalid screenshot is saved.
+        if (
+          !trackingRef.current ||
+          pausedRef.current ||
+          !isStreamLive(stream)
+        ) {
           return;
         }
 
@@ -10969,51 +9478,20 @@ export const EmployeeDashboard:
         // Freeze this screenshot's activity interval before awaiting uploads,
         // so events occurring during a slow upload belong to the next interval.
         // Snapshot global Windows input first. If the optional agent is not
-        // running, keep the existing in-page counters as a safe fallback.
+        // running, counts fall back to zero.
         const globalCounts = await callGlobalActivityAgent('snapshot');
-       
-//        const activityCounts: ScreenshotActivityCounts = {
-//   mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
-//   mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
-//   keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
-// };
 
-
-const activityCounts: ScreenshotActivityCounts = {
-  mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
-  mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
-  keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
-  activityPercent: Math.min(
-    100,
-    Math.max(0, Number(globalCounts?.activityPercent) || 0)
-  ),
-  activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
-  trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
-};
-
-
-activityCountsRef.current = {
-  mouseMoves: 0,
-  mouseClicks: 0,
-  keyPresses: 0,
-};
-
-lastMousePositionRef.current = {
-  x: 0,
-  y: 0,
-  initialized: false,
-};
-  //       const activityCounts: ScreenshotActivityCounts = globalCounts
-  // ? {
-  //     mouseMoves: Math.max(0, Number(globalCounts.mouseMoves) || 0),
-  //     mouseClicks: Math.max(0, Number(globalCounts.mouseClicks) || 0),
-  //     keyPresses: Math.max(0, Number(globalCounts.keyPresses) || 0),
-  //   }
-  // : {
-  //     mouseMoves: Math.max(0, Number(activityCountsRef.current.mouseMoves) || 0),
-  //     mouseClicks: Math.max(0, Number(activityCountsRef.current.mouseClicks) || 0),
-  //     keyPresses: Math.max(0, Number(activityCountsRef.current.keyPresses) || 0),
-  //   };
+        const activityCounts: ScreenshotActivityCounts = {
+          mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
+          mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
+          keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
+          activityPercent: Math.min(
+            100,
+            Math.max(0, Number(globalCounts?.activityPercent) || 0)
+          ),
+          activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
+          trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
+        };
 
         activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
         lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
@@ -11108,7 +9586,11 @@ lastMousePositionRef.current = {
           log
         );
 
-        // Persist counts in D1 so they survive refresh/logout and can be read
+        // Keep Admin in sync after every screenshot. This only READS the
+        // timer; it never changes timer state.
+        void syncTrackerTime(readClock().day);
+
+        // Persist counts so they survive refresh/logout and can be read
         // back for screenshot history. A count-save failure must not undo a screenshot.
         try {
           const response = await fetch(`${backendUrl}/api/activity-snapshot`, {
@@ -11124,7 +9606,7 @@ lastMousePositionRef.current = {
               mouseClicks: activityCounts.mouseClicks,
               keyPresses: activityCounts.keyPresses,
               activeSeconds: activityCounts.activeSeconds ?? 0,
-trackedSeconds: activityCounts.trackedSeconds ?? 0,
+              trackedSeconds: activityCounts.trackedSeconds ?? 0,
             }),
           });
           if (!response.ok) {
@@ -11600,15 +10082,9 @@ trackedSeconds: activityCounts.trackedSeconds ?? 0,
   // ====================================================
 
   useEffect(() => {
-    const stopScheduler = startScreenshotUploadScheduler();
+    const stopScheduler = startScreenshotUploadScheduler(currentUser.id);
     return stopScheduler;
   }, []);
-
-  // ====================================================
-  // GLOBAL POLICY
-  // ====================================================
-  // Capture policy is supplied by employee login and cached locally.
-  // No background /api/capture-settings polling is performed.
 
   // ====================================================
   // HISTORY
@@ -11616,6 +10092,8 @@ trackedSeconds: activityCounts.trackedSeconds ?? 0,
 
   const loadDateHistory =
     async () => {
+      const requestId = ++historyRequestRef.current;
+
       setLoadingHistory(
         true
       );
@@ -11666,18 +10144,39 @@ trackedSeconds: activityCounts.trackedSeconds ?? 0,
             activityResponse
           );
 
+        // A newer date was selected while this one was loading: drop this result.
+        if (requestId !== historyRequestRef.current) return; // [mtt] guard 1
+
         if (
           historyResponse.ok &&
-          historyData
-            ?.success
+          historyData?.success
         ) {
-          setActivityHistory(
-            Array.isArray(
-              historyData.records
-            )
-              ? historyData.records
-              : []
+          const records = Array.isArray(historyData.records)
+            ? historyData.records
+            : [];
+
+          setActivityHistory(records);
+
+          const todayKey = getTodayDateKey();
+
+          const todayRecord = records.find(
+            (record: ActivityHistoryRecord) =>
+              record.dateKey === todayKey
           );
+
+          const serverTodaySeconds = Math.max(
+            0,
+            Number(todayRecord?.totalSeconds) || 0
+          );
+
+          // If the server has more time than this browser, move the timer
+          // forward (base + display) so the running clock does not undo it.
+          if (serverTodaySeconds > daySecondsRef.current) {
+            const diff = serverTodaySeconds - daySecondsRef.current;
+            baseDayRef.current += diff;
+            daySecondsRef.current = serverTodaySeconds;
+            setDayTotalSeconds(serverTodaySeconds);
+          }
         }
 
         if (
@@ -11852,45 +10351,36 @@ trackedSeconds: activityCounts.trackedSeconds ?? 0,
             const countsByFile = new Map<string, ScreenshotActivityCounts>();
             for (const snapshot of (activityPayload?.snapshots || [])) {
               if (snapshot?.screenshotKey) {
-                // countsByFile.set(snapshot.screenshotKey, {
-                //   mouseMoves: Math.max(0, Number(snapshot.mouseMoves) || 0),
-                //   mouseClicks: Math.max(0, Number(snapshot.mouseClicks) || 0),
-                //   keyPresses: Math.max(0, Number(snapshot.keyPresses) || 0),
-                // });
-                
-countsByFile.set(snapshot.screenshotKey, {
-  mouseMoves: Math.max(0, Number(snapshot.mouseMoves) || 0),
-  mouseClicks: Math.max(0, Number(snapshot.mouseClicks) || 0),
-  keyPresses: Math.max(0, Number(snapshot.keyPresses) || 0),
-});
-
+                countsByFile.set(snapshot.screenshotKey, {
+                  mouseMoves: Math.max(0, Number(snapshot.mouseMoves) || 0),
+                  mouseClicks: Math.max(0, Number(snapshot.mouseClicks) || 0),
+                  keyPresses: Math.max(0, Number(snapshot.keyPresses) || 0),
+                });
               }
             }
             for (const screenshot of restored as (ScreenshotLog & { activityCounts?: ScreenshotActivityCounts; fileName?: string })[]) {
               const fileKey = String(screenshot.fileName || screenshot.driveFileId || '');
               const serverCounts = countsByFile.get(fileKey);
               if (serverCounts) {
-                // screenshot.activityCounts = serverCounts;
-                // saveActivityCounts(currentUser.id, selectedDate, fileKey, serverCounts);
-                
-const localCounts = screenshot.activityCounts;
+                const localCounts = screenshot.activityCounts;
 
-const mergedCounts: ScreenshotActivityCounts = {
-  ...serverCounts,
-  activityPercent: localCounts?.activityPercent ?? 0,
-  activeSeconds: localCounts?.activeSeconds ?? 0,
-  trackedSeconds: localCounts?.trackedSeconds ?? 0,
-};
+                const mergedCounts: ScreenshotActivityCounts = {
+                  ...serverCounts,
+                  activityPercent: localCounts?.activityPercent ?? 0,
+                  activeSeconds: localCounts?.activeSeconds ?? 0,
+                  trackedSeconds: localCounts?.trackedSeconds ?? 0,
+                };
 
-screenshot.activityCounts = mergedCounts;
-saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
-
+                screenshot.activityCounts = mergedCounts;
+                saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
               }
             }
           }
         } catch (activityFetchError) {
           console.warn('Activity snapshot fetch failed; using local counts:', activityFetchError);
         }
+
+        if (requestId !== historyRequestRef.current) return; // [mtt] guard 2
 
         restored.sort(
           (
@@ -11923,9 +10413,9 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
           error
         );
       } finally {
-        setLoadingHistory(
-          false
-        );
+        if (requestId === historyRequestRef.current) {
+          setLoadingHistory(false);
+        }
       }
     };
 
@@ -11956,6 +10446,9 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
         (
           screenshot
         ) => {
+          // Never show another date's screenshots while a new date is loading.
+          if (screenshot.dateKey !== selectedDate) return; // [mtt] date filter
+
 
           const key =
             screenshot
@@ -11997,8 +10490,26 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
         }
       );
 
+      // The same capture can arrive twice: once as a live log from this session
+      // and once loaded from storage / the server. Their IDs differ, so match them
+      // by the second they were captured (file names are Screen_<date>_<HH-MM-SS>).
+      // Items without a usable time keep their own key and are never merged.
+      const uniqueByCapture = new Map<string, ScreenshotLog>();
+
+      map.forEach((screenshot, originalKey) => {
+        const capturedAt = new Date(screenshot.timestamp).getTime();
+
+        const captureKey =
+          screenshot.timeFormatted && Number.isFinite(capturedAt)
+            ? `t:${Math.floor(capturedAt / 1000)}`
+            : `k:${originalKey}`;
+
+        // Later entries (live logs) win over earlier ones (loaded copies).
+        uniqueByCapture.set(captureKey, screenshot);
+      });
+
       return Array.from(
-        map.values()
+        uniqueByCapture.values()
       ).sort(
         (
           a,
@@ -12016,6 +10527,14 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
       userScreenshots,
       selectedDate,
     ]);
+
+  // ---- Screenshot pagination (client-side, filtered list only) ----
+  const screenshotPagination = usePagination(
+    mergedScreenshots,
+    `${currentUser.id}|${selectedDate}`
+  );
+  const pagedScreenshots = screenshotPagination.pageItems;
+
 
   // ====================================================
   // YEAR / MONTH HISTORY GROUPS
@@ -12099,7 +10618,7 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
       const loaded: Record<string, string> = {};
       const cache = employeeScreenshotUrlCacheRef.current;
 
-      for (const screenshot of mergedScreenshots) {
+      for (const screenshot of pagedScreenshots) {
         const source =
           screenshot.driveThumbnailLink ||
           screenshot.previewDataUrl ||
@@ -12162,7 +10681,7 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
     return () => {
       cancelled = true;
     };
-  }, [mergedScreenshots]);
+  }, [pagedScreenshots]);
 
   // ====================================================
   // START
@@ -12171,11 +10690,32 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
   const startTracking =
     async () => {
 
+      // Opens the browser screen chooser (inside the user's click) unless the
+      // existing stream is still live. Returns null if the employee cancels;
+      // then the timer stays paused and the reconnect popup stays visible.
       const stream =
         await initScreenStream();
 
       if (!stream) {
         return;
+      }
+
+      // Screen is shared (first start OR reconnect after refresh/lock/sleep).
+      setSessionFlag('running');
+      setShowReconnectModal(false);
+      setReconnectMessage(RECONNECT_POPUP_MESSAGE);
+
+      // Ask once (non-blocking) so reconnect alerts can reach the employee
+      // even when this tab is in the background.
+      try {
+        if (
+          'Notification' in window &&
+          Notification.permission === 'default'
+        ) {
+          void Notification.requestPermission();
+        }
+      } catch {
+        // ignore
       }
 
       trackingRef.current =
@@ -12197,8 +10737,12 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
       if (restoredSessionRef.current) {
         restoredSessionRef.current = false;
       } else {
+        sessionSecondsRef.current = 0;
         setSessionSeconds(0);
       }
+
+      // Timer starts from saved accumulated seconds + this timestamp.
+      beginSegment();
 
       setLastStatus(
         globalAgentStarted === null
@@ -12224,6 +10768,11 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
       pausedRef.current =
         true;
 
+      setSessionFlag('paused');
+
+      // Freeze elapsed time.
+      endSegment();
+
       await callGlobalActivityAgent('pause');
 
       setIsPaused(
@@ -12247,13 +10796,17 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
   // RESUME
   // ====================================================
 
- const resumeTracking =
-  async () => {
-    pausedRef.current =
-      false;
+  const resumeTracking =
+    async () => {
+      pausedRef.current =
+        false;
 
-    await callGlobalActivityAgent('resume');
+      setSessionFlag('running');
 
+      // Continue from the saved elapsed time.
+      beginSegment();
+
+      await callGlobalActivityAgent('resume');
 
       setIsPaused(
         false
@@ -12275,6 +10828,16 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
 
   const stopTracking =
     async () => {
+
+      // Freeze elapsed time first, then save it.
+      endSegment();
+
+      if (muteTimerRef.current !== null) {
+        window.clearTimeout(muteTimerRef.current);
+        muteTimerRef.current = null;
+      }
+
+      setSessionFlag(null);
 
       await syncTrackerTime();
       await callGlobalActivityAgent('stop');
@@ -12302,13 +10865,18 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
       if (
         screenStreamRef.current
       ) {
+        // Detach handlers first so manual Stop does not trigger an interruption.
         screenStreamRef.current
           .getTracks()
           .forEach(
             (
               track
-            ) =>
-              track.stop()
+            ) => {
+              track.onended = null;
+              track.onmute = null;
+              track.onunmute = null;
+              track.stop();
+            }
           );
 
         screenStreamRef.current =
@@ -12321,6 +10889,8 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
         screenVideoRef.current.srcObject =
           null;
       }
+
+      sessionSecondsRef.current = 0;
 
       setSessionSeconds(
         0
@@ -12338,6 +10908,45 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
     };
 
   // ====================================================
+  // RECONNECT SCREEN SHARING (after refresh / lock / sleep / interruption)
+  // ====================================================
+
+  // Reuses startTracking(): it opens the browser's screen chooser (must run
+  // inside this click), restores the saved session/day seconds, restarts the
+  // single timestamp timer, activity agent and screenshot schedule.
+  const reconnectScreenSharing =
+    async () => {
+      if (reconnecting) return;
+
+      setReconnecting(true);
+
+      try {
+        await startTracking();
+      } finally {
+        setReconnecting(false);
+      }
+    };
+
+  // Employee chooses not to reconnect: keep saved time, stay stopped.
+  const dismissReconnect =
+    () => {
+      setSessionFlag(null);
+      setShowReconnectModal(false);
+
+      setLastStatus(
+        'Tracking stopped. Saved time is kept. Click Start Tracking to continue.'
+      );
+
+      void syncTrackerTime(daySecondsRef.current);
+    };
+
+  const handleLogout =
+    () => {
+      setSessionFlag(null);
+      onLogout?.();
+    };
+
+  // ====================================================
   // CLEANUP
   // ====================================================
 
@@ -12345,6 +10954,11 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
     return () => {
 
       clearCaptureTimers();
+
+      if (muteTimerRef.current !== null) {
+        window.clearTimeout(muteTimerRef.current);
+        muteTimerRef.current = null;
+      }
 
       if (
         trackerTimerRef.current
@@ -12403,6 +11017,105 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
   const today =
     getTodayDateKey();
 
+  // Records for the My Time Tracking card. Today's row also reflects the live
+  // timer (read only), so the calendar never lags behind the running clock.
+  const myTimeRecords: ActivityHistoryRecord[] = (() => {
+    const list = activityHistory.map((record) => ({ ...record }));
+
+    if (dayTotalSeconds > 0) {
+      const todayRecord = list.find((record) => record.dateKey === today);
+
+      if (todayRecord) {
+        todayRecord.totalSeconds = Math.max(
+          todayRecord.totalSeconds,
+          dayTotalSeconds
+        );
+      } else {
+        list.push({
+          dateKey: today,
+          totalSeconds: dayTotalSeconds,
+          screenshotCount: 0,
+        });
+      }
+    }
+
+    return list.map((record) => ({
+      ...record,
+      totalSeconds: record.totalSeconds + (record.approvedSeconds || 0),
+    }));
+  })();
+
+  const summaryCards = (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+
+        <div className="text-[11px] uppercase font-bold text-slate-500">
+          Current Task Duration
+        </div>
+
+        <div className="text-2xl font-black mt-2">
+          {formatSecondsToHoursMinutes(
+            sessionSeconds
+          )}
+        </div>
+
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+
+        <div className="text-[11px] uppercase font-bold text-slate-500">
+          Today Total Tracked
+        </div>
+
+        <div className="text-2xl font-black mt-2 text-emerald-600">
+          {formatSecondsToHoursMinutes(dayTotalSeconds + (activityHistory.find((r) => r.dateKey === today)?.approvedSeconds || 0))}
+        </div>
+
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+
+        <div className="text-[11px] uppercase font-bold text-slate-500">
+          Selected Date Screenshots
+        </div>
+
+        <div className="text-2xl font-black mt-2 text-indigo-600">
+          {selectedDateScreenshotCount}
+        </div>
+
+      </div>
+
+    </div>
+  );
+
+  const statusPanel = (
+    <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 flex items-start gap-2">
+
+      {lastStatus.startsWith(
+        '✅'
+      ) ? (
+        <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />
+      ) : (
+        <AlertCircle className="w-4 h-4 mt-0.5 text-indigo-600 shrink-0" />
+      )}
+
+      <div className="text-xs">
+
+        {lastStatus}
+
+        {lastCapturedTime && (
+          <div className="text-slate-500 mt-1">
+            Last screenshot:{' '}
+            {lastCapturedTime}
+          </div>
+        )}
+
+      </div>
+
+    </div>
+  );
+
   // ====================================================
   // RENDER
   // ====================================================
@@ -12440,7 +11153,7 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
           <button
             type="button"
             onClick={
-              onLogout
+              handleLogout
             }
             className="cursor-pointer px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
           >
@@ -12450,626 +11163,625 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
 
       </div>
 
-      {/* TRACKING CARD */}
+      {/* TAB LAYOUT: navigation + content. Tabs only change which UI is visible;
+          all tracking state, timers, refs and the screen-share video live above
+          in this component and keep running while the employee switches tabs. */}
 
-      <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/20 p-6 space-y-5">
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
 
-        <div>
+        {/* NAVIGATION */}
 
-          <label className="text-xs uppercase font-bold text-slate-500">
-            Currently Working On
-          </label>
+        <nav
+          aria-label="Employee dashboard navigation"
+          className="w-full lg:w-64 lg:shrink-0 lg:sticky lg:top-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2 lg:p-3 shadow-sm"
+        >
+          <div
+            role="tablist"
+            className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible"
+          >
+            {EMPLOYEE_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
 
-          <input
-            type="text"
-            value={
-              taskName
-            }
-            onChange={(
-              event
-            ) =>
-              setTaskName(
-                event.target
-                  .value
-              )
-            }
-            className="mt-2 w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`cursor-pointer shrink-0 lg:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold whitespace-nowrap text-left transition ${
+                    active
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+
+        {/* TAB CONTENT */}
+
+        <div className="flex-1 min-w-0 w-full space-y-6">
+
+          <ScheduleAlertsManager
+            employeeId={currentUser.id}
+            showSettings={activeTab === 'alerts'}
+            isTracking={isTracking}
+            isPaused={isPaused}
+            sessionSeconds={sessionSeconds}
+            dayTotalSeconds={dayTotalSeconds}
+            onStart={startTracking}
+            onPause={pauseTracking}
+            onResume={resumeTracking}
+            onStop={stopTracking}
           />
 
-        </div>
 
-        {/* POLICY */}
+          {/* DASHBOARD (everything that used to be in Time Tracker) */}
 
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-
-          <div className="flex flex-wrap items-center gap-2">
-
-            <Camera className="w-4 h-4 text-indigo-600" />
-
-            <span className="text-xs font-bold">
-              Live Admin Capture Policy:
-            </span>
-
-            <span className="text-sm font-black text-indigo-600">
-              {policyText}
-            </span>
-
-            <span className="px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-              AUTO SYNC
-            </span>
-
-          </div>
-
-          <div className="mt-2 text-[11px] text-slate-500">
-
-            {capturePresetId ===
-            'custom'
-              ? 'Custom policy selected by Admin.'
-              : 'Preset policy selected by Admin.'}
-
-            {centralPolicyUpdatedAt
-              ? ` Last updated: ${new Date(
-                  centralPolicyUpdatedAt
-                ).toLocaleTimeString()}`
-              : ''}
-
-          </div>
-
-        </div>
-
-        {/* BUTTONS */}
-
-        <div className="flex flex-col sm:flex-row gap-3">
-
-          {!isTracking ? (
-            <button
-              type="button"
-              onClick={
-                startTracking
-              }
-              className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-            >
-              <Play className="w-4 h-4" />
-
-              Start Tracking
-            </button>
-          ) : (
+          {activeTab === 'dashboard' && (
             <>
-              {!isPaused ? (
-                <button
-                  type="button"
-                  onClick={
-                    pauseTracking
-                  }
-                  className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold"
-                >
-                  <Pause className="w-4 h-4" />
+                <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/20 p-6 space-y-5">
 
-                  Pause
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={
-                    resumeTracking
-                  }
-                  className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
-                >
-                  <Play className="w-4 h-4" />
+                  <div>
 
-                  Resume
-                </button>
-              )}
+                    <label className="text-xs uppercase font-bold text-slate-500">
+                      Currently Working On
+                    </label>
 
-              <button
-                type="button"
-                onClick={
-                  stopTracking
-                }
-                className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
-              >
-                <Square className="w-4 h-4" />
+                    <input
+                      type="text"
+                      value={
+                        taskName
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setTaskName(
+                          event.target
+                            .value
+                        )
+                      }
+                      className="mt-2 w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
 
-                Stop
-              </button>
+                  </div>
+
+                  {/* POLICY */}
+
+                  <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+
+                    <div className="flex flex-wrap items-center gap-2">
+
+                      <Camera className="w-4 h-4 text-indigo-600" />
+
+                      <span className="text-xs font-bold">
+                        Live Admin Capture Policy:
+                      </span>
+
+                      <span className="text-sm font-black text-indigo-600">
+                        {policyText}
+                      </span>
+
+                      <span className="px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                        AUTO SYNC
+                      </span>
+
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-slate-500">
+
+                      {capturePresetId ===
+                      'custom'
+                        ? 'Custom policy selected by Admin.'
+                        : 'Preset policy selected by Admin.'}
+
+                      {centralPolicyUpdatedAt
+                        ? ` Last updated: ${new Date(
+                            centralPolicyUpdatedAt
+                          ).toLocaleTimeString()}`
+                        : ''}
+
+                    </div>
+
+                  </div>
+
+                  {/* BUTTONS */}
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+
+                    {!isTracking ? (
+                      <button
+                        type="button"
+                        onClick={
+                          startTracking
+                        }
+                        className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                      >
+                        <Play className="w-4 h-4" />
+
+                        Start Tracking
+                      </button>
+                    ) : (
+                      <>
+                        {!isPaused ? (
+                          <button
+                            type="button"
+                            onClick={
+                              pauseTracking
+                            }
+                            className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold"
+                          >
+                            <Pause className="w-4 h-4" />
+
+                            Pause
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={
+                              resumeTracking
+                            }
+                            className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+                          >
+                            <Play className="w-4 h-4" />
+
+                            Resume
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={
+                            stopTracking
+                          }
+                          className="cursor-pointer flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
+                        >
+                          <Square className="w-4 h-4" />
+
+                          Stop
+                        </button>
+                      </>
+                    )}
+
+                  </div>
+
+                  {/* CAPTURE COUNTDOWN */}
+
+                  {isTracking &&
+                    !isPaused &&
+                    nextCaptureInSec !==
+                      null && (
+                    <div className="text-xs text-center font-semibold text-slate-600 dark:text-slate-300">
+
+                      Next random screenshot in approximately{' '}
+
+                      <span className="font-mono text-indigo-600">
+                        {nextCaptureInSec}s
+                      </span>
+
+                    </div>
+                  )}
+
+                </div>
+
+              {summaryCards}
+
+              {statusPanel}
             </>
           )}
 
-        </div>
+          {/* ACTIVITY REPORTS */}
 
-        {/* CAPTURE COUNTDOWN */}
-
-        {isTracking &&
-          !isPaused &&
-          nextCaptureInSec !==
-            null && (
-          <div className="text-xs text-center font-semibold text-slate-600 dark:text-slate-300">
-
-            Next random screenshot in approximately{' '}
-
-            <span className="font-mono text-indigo-600">
-              {nextCaptureInSec}s
-            </span>
-
-          </div>
-        )}
-
-      </div>
-
-      {/* SUMMARY */}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-          <div className="text-[11px] uppercase font-bold text-slate-500">
-            Current Task Duration
-          </div>
-
-          <div className="text-2xl font-black mt-2">
-            {formatSecondsToHoursMinutes(
-              sessionSeconds
-            )}
-          </div>
-
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-          <div className="text-[11px] uppercase font-bold text-slate-500">
-            Today Total Tracked
-          </div>
-
-          <div className="text-2xl font-black mt-2 text-emerald-600">
-            {formatSecondsToHoursMinutes(
-              dayTotalSeconds
-            )}
-          </div>
-
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-
-          <div className="text-[11px] uppercase font-bold text-slate-500">
-            Selected Date Screenshots
-          </div>
-
-          <div className="text-2xl font-black mt-2 text-indigo-600">
-            {selectedDateScreenshotCount}
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* STATUS */}
-
-      <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 flex items-start gap-2">
-
-        {lastStatus.startsWith(
-          '✅'
-        ) ? (
-          <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />
-        ) : (
-          <AlertCircle className="w-4 h-4 mt-0.5 text-indigo-600 shrink-0" />
-        )}
-
-        <div className="text-xs">
-
-          {lastStatus}
-
-          {lastCapturedTime && (
-            <div className="text-slate-500 mt-1">
-              Last screenshot:{' '}
-              {lastCapturedTime}
-            </div>
-          )}
-
-        </div>
-
-      </div>
-
-      {/* DATE HISTORY */}
-
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-
-        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-
-          <div>
-
-            <h2 className="font-bold flex items-center gap-2">
-
-              <Calendar className="w-5 h-5 text-indigo-600" />
-
-              My Date-wise Work History
-
-            </h2>
-
-            <p className="text-xs text-slate-500 mt-1">
-              Select a date to view actual tracked time and central screenshots.
-            </p>
-
-          </div>
-
-          <div className="flex items-center gap-2">
-
-            <input
-              type="date"
-              value={
-                selectedDate
-              }
-              max={
-                today
-              }
-              onChange={(
-                event
-              ) =>
-                setSelectedDate(
-                  event.target
-                    .value ||
-                    today
-                )
-              }
-              className="px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+          {activeTab === 'forgotten' && (
+            <EmployeeForgottenTime
+              employeeId={currentUser.id}
+              todayKey={getTodayDateKey()}
+              request={(path, init) => fetch(`${backendUrl}${path}`, init)}
             />
-
-            <button
-              type="button"
-              onClick={
-                loadDateHistory
-              }
-              className="cursor-pointer p-2 rounded-lg border border-slate-300 dark:border-slate-700"
-              title="Refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-
-          </div>
-
-        </div>
-
-        <div className="p-5 space-y-5">
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-
-            <div className="rounded-xl p-4 bg-slate-50 dark:bg-slate-800">
-
-              <div className="text-[11px] uppercase font-bold text-slate-500">
-                Selected Date
-              </div>
-
-              <div className="font-bold mt-1">
-                {selectedDate}
-              </div>
-
-            </div>
-
-            <div className="rounded-xl p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-
-              <div className="text-[11px] uppercase font-bold text-slate-500">
-                Actual Tracked Time
-              </div>
-
-              <div className="text-xl font-black mt-1 text-emerald-600">
-                {loadingHistory
-                  ? 'Loading...'
-                  : formatSecondsToHoursMinutes(
-                      selectedDateSeconds
-                    )}
-              </div>
-
-            </div>
-
-            <div className="rounded-xl p-4 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
-
-              <div className="text-[11px] uppercase font-bold text-slate-500">
-                Screenshots
-              </div>
-
-              <div className="text-xl font-black mt-1 text-indigo-600">
-                {loadingHistory
-                  ? '...'
-                  : selectedDateScreenshotCount}
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* YEAR > MONTH > DATE HISTORY */}
-
-          {activityHistory.length > 0 && (
-            <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-                <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-                  Year
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {historyYears.map((year) => (
-                    <button
-                      key={year}
-                      type="button"
-                      onClick={() => {
-                        setSelectedHistoryYear(year);
-
-                        const firstMonth = activityHistory
-                          .filter((record) => record.dateKey.startsWith(`${year}-`))
-                          .map((record) => record.dateKey.slice(0, 7))
-                          .sort((a, b) => b.localeCompare(a))[0];
-
-                        if (firstMonth) {
-                          setSelectedHistoryMonth(firstMonth);
-                        }
-                      }}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
-                        selectedHistoryYear === year
-                          ? 'bg-indigo-600 text-white border-indigo-600'
-                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
-                      }`}
-                    >
-                      {year}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-                <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-                  Month
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {historyMonths.map((month) => (
-                    <button
-                      key={month}
-                      type="button"
-                      onClick={() => setSelectedHistoryMonth(month)}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
-                        selectedHistoryMonth === month
-                          ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-400'
-                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
-                      }`}
-                    >
-                      {monthLabel(month)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4">
-                <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
-                  Dates
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-                  {filteredHistoryDates.map((record) => (
-                    <button
-                      key={record.dateKey}
-                      type="button"
-                      onClick={() => setSelectedDate(record.dateKey)}
-                      className={`text-left rounded-xl border p-3 transition ${
-                        selectedDate === record.dateKey
-                          ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400'
-                      }`}
-                    >
-                      <div className="font-bold text-sm">
-                        {new Date(`${record.dateKey}T00:00:00`).toLocaleDateString(
-                          undefined,
-                          { day: '2-digit', month: 'short', year: 'numeric' }
-                        )}
-                      </div>
-
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        {formatSecondsToHoursMinutes(record.totalSeconds)}
-                        {' • '}
-                        {record.screenshotCount} screenshot{record.screenshotCount === 1 ? '' : 's'}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-            </div>
           )}
 
-          {/* SCREENSHOTS */}
+          {activeTab === 'reports' && (
+            <>
+                <TimeActivityReport
+                  title="My time and activity report"
+                  fileName={`work-report_${currentUser.name.replace(/\s+/g, '_')}`}
+                  allowMemberSelect={false}
+                  members={[
+                    {
+                      id: currentUser.id,
+                      name: currentUser.name,
+                      email: currentUser.email,
+                    },
+                  ]}
+                  loadHistory={async () => {
+                    const res = await fetch(
+                      `${backendUrl}/api/activity-history/${encodeURIComponent(currentUser.id)}`,
+                      { cache: 'no-store', headers: backendHeaders }
+                    );
 
-          <div>
+                    const data = await readApiJson(res);
 
-            <div className="flex items-center justify-between gap-3 mb-4">
+                    if (!res.ok || !data?.success) {
+                      throw new Error(data?.error || 'Failed to load history');
+                    }
 
-              <div>
+                    const records: ActivityHistoryRecord[] = (
+                      Array.isArray(data.records) ? data.records : []
+                    ).map((r: ActivityHistoryRecord) => ({ ...r }));
 
-                <h3 className="font-bold flex items-center gap-2">
+                    const ensure = (dateKey: string) => {
+                      let rec = records.find((r) => r.dateKey === dateKey);
 
-                  <Camera className="w-4 h-4 text-indigo-600" />
-
-                  Screenshot History
-
-                </h3>
-
-                <div className="text-xs text-slate-500 mt-1">
-                  {selectedDate}
-                </div>
-
-              </div>
-
-              <div className="text-xs font-bold text-indigo-600">
-                {
-                  mergedScreenshots.length
-                }{' '}
-                captures
-              </div>
-
-            </div>
-
-            {mergedScreenshots.length ===
-            0 ? (
-              <div className="py-14 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
-
-                <Camera className="w-10 h-10 mx-auto text-slate-400 mb-2" />
-
-                <div className="text-sm font-semibold">
-                  No screenshots found
-                </div>
-
-                <div className="text-xs text-slate-500 mt-1">
-                  No central screenshots are available for {selectedDate}.
-                </div>
-
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
-                {mergedScreenshots.map(
-                  (
-                    screenshot
-                  ) => (
-                    <button
-                      key={
-                        screenshot.id
+                      if (!rec) {
+                        rec = {
+                          dateKey,
+                          totalSeconds: 0,
+                          screenshotCount: 0,
+                        };
+                        records.push(rec);
                       }
-                      type="button"
-                      onClick={() =>
-                        setPreviewModal(
-                          screenshot
-                        )
-                      }
-                      className="cursor-pointer text-left rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:border-indigo-400 transition"
-                    >
 
-                      {(() => {
-                        const source =
-                          screenshot.driveThumbnailLink ||
-                          screenshot.previewDataUrl ||
-                          '';
+                      return rec;
+                    };
 
-                        const displayUrl =
-                          employeeScreenshotUrls[source] ||
-                          (source.startsWith('data:') || source.startsWith('blob:')
-                            ? source
-                            : '');
+                    if (dayTotalSeconds > 0) {
+                      const rec = ensure(getTodayDateKey());
+                      rec.totalSeconds = Math.max(
+                        rec.totalSeconds,
+                        dayTotalSeconds
+                      );
+                    }
 
-                        return displayUrl ? (
-                          <img
-                            src={displayUrl}
-                            alt="Screenshot"
-                            className="w-full aspect-video object-cover bg-slate-950"
-                          />
-                        ) : (
-                          <div className="w-full aspect-video bg-slate-950 flex items-center justify-center text-xs text-slate-400">
-                            Loading screenshot...
+                    if (selectedDateScreenshotCount > 0) {
+                      const rec = ensure(selectedDate);
+                      rec.screenshotCount = Math.max(
+                        rec.screenshotCount,
+                        selectedDateScreenshotCount
+                      );
+                    }
+
+return records.map((r) => ({
+                      ...r,
+                      totalSeconds: r.totalSeconds + (r.approvedSeconds || 0),
+                    }));
+                  }}
+                />
+            </>
+          )}
+
+          {/* DATE-WISE WORK HISTORY (with screenshot history) */}
+
+          {activeTab === 'history' && (
+            <>
+                <MyTimeTracking
+                  mode={historyViewMode}
+                  onModeChange={setHistoryViewMode}
+                  selectedDate={selectedDate}
+                  onSelectedDateChange={setSelectedDate}
+                  todayKey={today}
+                  records={myTimeRecords}
+                  selectedDayScreenshots={
+                    loadingHistory ? undefined : selectedDateScreenshotCount
+                  }
+                  loading={loadingHistory}
+                  onRefresh={() => void loadDateHistory()}
+                  formatDuration={formatSecondsToHoursMinutes}
+                >
+                  <div className="space-y-5">
+
+                    {/* YEAR > MONTH > DATE HISTORY */}
+
+                    {SHOW_LEGACY_DATE_NAVIGATOR && activityHistory.length > 0 && (
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+
+                        <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                          <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
+                            Year
                           </div>
-                        );
-                      })()}
 
-                      <div className="p-3">
+                          <div className="flex flex-wrap gap-2">
+                            {historyYears.map((year) => (
+                              <button
+                                key={year}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedHistoryYear(year);
 
-                        <div className="text-xs font-bold">
+                                  const firstMonth = activityHistory
+                                    .filter((record) => record.dateKey.startsWith(`${year}-`))
+                                    .map((record) => record.dateKey.slice(0, 7))
+                                    .sort((a, b) => b.localeCompare(a))[0];
+
+                                  if (firstMonth) {
+                                    setSelectedHistoryMonth(firstMonth);
+                                  }
+                                }}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
+                                  selectedHistoryYear === year
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
+                                }`}
+                              >
+                                {year}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                          <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
+                            Month
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            {historyMonths.map((month) => (
+                              <button
+                                key={month}
+                                type="button"
+                                onClick={() => setSelectedHistoryMonth(month)}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${
+                                  selectedHistoryMonth === month
+                                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-400'
+                                    : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 hover:border-indigo-400'
+                                }`}
+                              >
+                                {monthLabel(month)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="p-4">
+                          <div className="text-[11px] uppercase font-bold text-slate-500 mb-2">
+                            Dates
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                            {filteredHistoryDates.map((record) => (
+                              <button
+                                key={record.dateKey}
+                                type="button"
+                                onClick={() => setSelectedDate(record.dateKey)}
+                                className={`text-left rounded-xl border p-3 transition ${
+                                  selectedDate === record.dateKey
+                                    ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400'
+                                    : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400'
+                                }`}
+                              >
+                                <div className="font-bold text-sm">
+                                  {new Date(`${record.dateKey}T00:00:00`).toLocaleDateString(
+                                    undefined,
+                                    { day: '2-digit', month: 'short', year: 'numeric' }
+                                  )}
+                                </div>
+
+                                <div className="text-[11px] text-slate-500 mt-1">
+                                  {formatSecondsToHoursMinutes(record.totalSeconds)}
+                                  {' • '}
+                                  {record.screenshotCount} screenshot{record.screenshotCount === 1 ? '' : 's'}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                    {/* SCREENSHOTS */}
+
+                    <div>
+
+                      <div className="flex items-center justify-between gap-3 mb-4">
+
+                        <div>
+
+                          <h3 className="font-bold flex items-center gap-2">
+
+                            <Camera className="w-4 h-4 text-indigo-600" />
+
+                            Screenshot History
+
+                          </h3>
+
+                          <div className="text-xs text-slate-500 mt-1">
+                            {selectedDate}
+                          </div>
+
+                        </div>
+
+                        <div className="text-xs font-bold text-indigo-600">
                           {
-                            screenshot.taskName
-                          }
+                            mergedScreenshots.length
+                          }{' '}
+                          captures
                         </div>
-
-                        <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-
-                          <Clock className="w-3 h-3" />
-
-                          {screenshot.timeFormatted ||
-                            'Saved capture'}
-
-                        </div>
-
-                        
-{(() => {
-  const counts = (
-    screenshot as ScreenshotLog & {
-      activityCounts?: ScreenshotActivityCounts;
-    }
-  ).activityCounts;
-
-  const activityPercent = Math.min(
-    100,
-    Math.max(0, Number(counts?.activityPercent) || 0)
-  );
-
-  const activityColor =
-    activityPercent === 0
-      ? 'bg-slate-400'
-      : activityPercent <= 25
-        ? 'bg-red-500'
-        : activityPercent <= 55
-          ? 'bg-orange-500'
-          : 'bg-green-500';
-
-  const activityTextColor =
-    activityPercent === 0
-      ? 'text-slate-500'
-      : activityPercent <= 25
-        ? 'text-red-500'
-        : activityPercent <= 55
-          ? 'text-orange-500'
-          : 'text-green-600';
-
-  return (
-    <div className="mt-3">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-          Activity
-        </span>
-        <span className={`text-xs font-bold ${activityTextColor}`}>
-          {activityPercent}%
-        </span>
-      </div>
-
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
-        role="progressbar"
-        aria-label="Screenshot activity"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={activityPercent}
-      >
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${activityColor}`}
-          style={{ width: `${activityPercent}%` }}
-        />
-      </div>
-
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
-        <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
-          <div className="font-semibold">Mouse moves</div>
-          <div>{counts?.mouseMoves ?? 0}</div>
-        </div>
-
-        <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
-          <div className="font-semibold">Clicks</div>
-          <div>{counts?.mouseClicks ?? 0}</div>
-        </div>
-
-        <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
-          <div className="font-semibold">Key presses</div>
-          <div>{counts?.keyPresses ?? 0}</div>
-        </div>
-      </div>
-    </div>
-  );
-})()}
-
 
                       </div>
 
-                    </button>
-                  )
-                )}
+                      {mergedScreenshots.length ===
+                      0 ? (
+                        <div className="py-14 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
 
-              </div>
-            )}
+                          <Camera className="w-10 h-10 mx-auto text-slate-400 mb-2" />
 
-          </div>
+                          <div className="text-sm font-semibold">
+                            No screenshots found
+                          </div>
+
+                          <div className="text-xs text-slate-500 mt-1">
+                            No central screenshots are available for {selectedDate}.
+                          </div>
+
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                          {pagedScreenshots.map(
+                            (
+                              screenshot
+                            ) => (
+                              <button
+                                key={
+                                  screenshot.id
+                                }
+                                type="button"
+                                onClick={() =>
+                                  setPreviewModal(
+                                    screenshot
+                                  )
+                                }
+                                className="cursor-pointer text-left rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:border-indigo-400 transition"
+                              >
+
+                                {(() => {
+                                  const source =
+                                    screenshot.driveThumbnailLink ||
+                                    screenshot.previewDataUrl ||
+                                    '';
+
+                                  const displayUrl =
+                                    employeeScreenshotUrls[source] ||
+                                    (source.startsWith('data:') || source.startsWith('blob:')
+                                      ? source
+                                      : '');
+
+                                  return displayUrl ? (
+                                    <img
+                                      src={displayUrl}
+                                      alt="Screenshot"
+                                      className="w-full aspect-video object-cover bg-slate-950"
+                                    />
+                                  ) : (
+                                    <div className="w-full aspect-video bg-slate-950 flex items-center justify-center text-xs text-slate-400">
+                                      Loading screenshot...
+                                    </div>
+                                  );
+                                })()}
+
+                                <div className="p-3">
+
+                                  <div className="text-xs font-bold">
+                                    {
+                                      screenshot.taskName
+                                    }
+                                  </div>
+
+                                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+
+                                    <Clock className="w-3 h-3" />
+
+                                    {screenshot.timeFormatted ||
+                                      'Saved capture'}
+
+                                  </div>
+
+                                  {(() => {
+                                    const counts = (
+                                      screenshot as ScreenshotLog & {
+                                        activityCounts?: ScreenshotActivityCounts;
+                                      }
+                                    ).activityCounts;
+
+                                    const activityPercent = Math.min(
+                                      100,
+                                      Math.max(0, Number(counts?.activityPercent) || 0)
+                                    );
+
+                                    const activityColor =
+                                      activityPercent === 0
+                                        ? 'bg-slate-400'
+                                        : activityPercent <= 25
+                                          ? 'bg-red-500'
+                                          : activityPercent <= 55
+                                            ? 'bg-orange-500'
+                                            : 'bg-green-500';
+
+                                    const activityTextColor =
+                                      activityPercent === 0
+                                        ? 'text-slate-500'
+                                        : activityPercent <= 25
+                                          ? 'text-red-500'
+                                          : activityPercent <= 55
+                                            ? 'text-orange-500'
+                                            : 'text-green-600';
+
+                                    return (
+                                      <div className="mt-3">
+                                        <div className="mb-1 flex items-center justify-between">
+                                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                            Activity
+                                          </span>
+                                          <span className={`text-xs font-bold ${activityTextColor}`}>
+                                            {activityPercent}%
+                                          </span>
+                                        </div>
+
+                                        <div
+                                          className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
+                                          role="progressbar"
+                                          aria-label="Screenshot activity"
+                                          aria-valuemin={0}
+                                          aria-valuemax={100}
+                                          aria-valuenow={activityPercent}
+                                        >
+                                          <div
+                                            className={`h-full rounded-full transition-all duration-300 ${activityColor}`}
+                                            style={{ width: `${activityPercent}%` }}
+                                          />
+                                        </div>
+
+                                        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
+                                          <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+                                            <div className="font-semibold">Mouse moves</div>
+                                            <div>{counts?.mouseMoves ?? 0}</div>
+                                          </div>
+
+                                          <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+                                            <div className="font-semibold">Clicks</div>
+                                            <div>{counts?.mouseClicks ?? 0}</div>
+                                          </div>
+
+                                          <div className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+                                            <div className="font-semibold">Key presses</div>
+                                            <div>{counts?.keyPresses ?? 0}</div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+
+                                </div>
+
+                              </button>
+                            )
+                          )}
+
+                        </div>
+                      )}
+
+
+                      <PaginationControls
+                        page={screenshotPagination.page}
+                        totalPages={screenshotPagination.totalPages}
+                        totalItems={screenshotPagination.totalItems}
+                        firstItemNumber={screenshotPagination.firstItemNumber}
+                        lastItemNumber={screenshotPagination.lastItemNumber}
+                        onPageChange={screenshotPagination.setPage}
+                      />
+
+                    </div>
+
+                  </div>
+                </MyTimeTracking>
+            </>
+          )}
 
         </div>
 
@@ -13156,6 +11868,62 @@ saveActivityCounts(currentUser.id, selectedDate, fileKey, mergedCounts);
               </div>
 
             </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* RECONNECT SCREEN SHARING POPUP (refresh / lock / sleep / interruption) */}
+
+      {showReconnectModal && !isTracking && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="wm-reconnect-title"
+        >
+
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-center shadow-2xl">
+
+            <div className="mx-auto w-14 h-14 rounded-full bg-indigo-100 dark:bg-indigo-950 flex items-center justify-center">
+              <Monitor className="w-6 h-6 text-indigo-600" />
+            </div>
+
+            <h2
+              id="wm-reconnect-title"
+              className="mt-4 text-xl font-black"
+            >
+              {RECONNECT_POPUP_TITLE}
+            </h2>
+
+            <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+              {reconnectMessage}
+            </p>
+
+            <button
+              type="button"
+              onClick={reconnectScreenSharing}
+              disabled={reconnecting}
+              className="cursor-pointer mt-5 w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold"
+            >
+              <Monitor className="w-4 h-4" />
+
+              Choose screen &amp; reconnect
+            </button>
+
+            <p className="mt-3 text-[11px] text-slate-500">
+              Browser security requires you to click this button before the
+              screen-sharing chooser can open.
+            </p>
+
+            <button
+              type="button"
+              onClick={dismissReconnect}
+              className="cursor-pointer mt-3 text-[11px] text-slate-500 underline"
+            >
+              Stop for now (saved time is kept)
+            </button>
 
           </div>
 

@@ -11,6 +11,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+const adminTokens = new Set();
+
 // Railway/Render/etc. terminate HTTPS before forwarding to Express.
 app.set('trust proxy', 1);
 
@@ -143,7 +145,7 @@ app.post('/api/login-admin', (req, res) => {
         createdAt: '2026-09-01T08:00:00.000Z',
         lastActive: now.toISOString(),
       },
-      token: randomUUID(),
+      token: (() => { const t = randomUUID(); adminTokens.add(t); return t; })(),
       expiresAt,
     });
   } catch (error) {
@@ -420,6 +422,246 @@ function writeJson(
     )
   );
 }
+
+// ======================================================
+// FORGOTTEN TIME REQUESTS
+// ======================================================
+const FORGOTTEN_DB = path.join(UPLOAD_DIR, 'forgotten-time-requests.json');
+ensureArrayFile(FORGOTTEN_DB);
+
+const readForgotten = () => readArray(FORGOTTEN_DB, 'forgotten time requests');
+const saveForgotten = (data) => writeJson(FORGOTTEN_DB, data);
+
+function approvedSecondsFor(employeeId, dateKey) {
+  return readForgotten()
+    .filter((r) => r.employeeId === employeeId && r.date === dateKey && r.status === 'approved')
+    .reduce((t, r) => t + (Number(r.approvedSeconds) || 0), 0);
+}
+
+function approvedSecondsForMonth(employeeId, monthKey) {
+  return readForgotten()
+    .filter((r) => r.employeeId === employeeId && r.status === 'approved' && String(r.date).startsWith(monthKey))
+    .reduce((t, r) => t + (Number(r.approvedSeconds) || 0), 0);
+}
+
+function parseHm(value) {
+  const parts = String(value || '').split(':');
+  if (parts.length !== 2) return null;
+  const h = Number(parts[0]);
+  const mi = Number(parts[1]);
+  if (!Number.isInteger(h) || !Number.isInteger(mi) || h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+// Set FT_ENFORCE_ADMIN=1 to require the admin login token on admin routes.
+function requireAdmin(req, res, next) {
+  if (process.env.FT_ENFORCE_ADMIN !== '1') return next();
+  const token = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!adminTokens.has(token)) {
+    return res.status(401).json({ success: false, error: 'Admin login required.' });
+  }
+  next();
+}
+
+// Adds approvedSeconds to existing GET responses. Actual totalSeconds is NEVER changed.
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  const parts = req.path.split('/').filter(Boolean);
+  if (parts[0] !== 'api') return next();
+  const orig = res.json.bind(res);
+
+  if (parts[1] === 'activity-history' && parts.length === 3) {
+    res.json = (body) => {
+      try {
+        const id = decodeURIComponent(parts[2]);
+        if (body && body.success && Array.isArray(body.records)) {
+          const approved = readForgotten().filter((r) => r.employeeId === id && r.status === 'approved');
+          approved.forEach((r) => {
+            if (!body.records.some((x) => x.dateKey === r.date)) {
+              body.records.push({
+                dateKey: r.date, totalSeconds: 0, screenshotCount: 0,
+                activeSeconds: 0, trackedSeconds: 0, mouseMoves: 0, mouseClicks: 0, keyPresses: 0,
+              });
+            }
+          });
+          body.records.sort((a, b) => String(b.dateKey).localeCompare(String(a.dateKey)));
+          body.records.forEach((rec) => { rec.approvedSeconds = approvedSecondsFor(id, rec.dateKey); });
+        }
+      } catch (e) { console.warn('Forgotten time history merge failed:', e.message); }
+      return orig(body);
+    };
+  } else if (parts[1] === 'activity' && parts.length === 4) {
+    res.json = (body) => {
+      try {
+        if (body && body.success) {
+          body.approvedSeconds = approvedSecondsFor(decodeURIComponent(parts[2]), decodeURIComponent(parts[3]));
+        }
+      } catch (e) { console.warn('Forgotten time activity merge failed:', e.message); }
+      return orig(body);
+    };
+  } else if (parts[1] === 'admin' && parts[2] === 'activity-summary') {
+    res.json = (body) => {
+      try {
+        if (body && body.success && Array.isArray(body.employees)) {
+          body.employees.forEach((e) => {
+            e.todaySeconds = (Number(e.todaySeconds) || 0) + approvedSecondsFor(e.employeeId, body.today);
+            e.monthlySeconds = (Number(e.monthlySeconds) || 0) + approvedSecondsForMonth(e.employeeId, body.monthKey);
+          });
+        }
+      } catch (e) { console.warn('Forgotten time summary merge failed:', e.message); }
+      return orig(body);
+    };
+  }
+  next();
+});
+
+// Employee: submit
+app.post('/api/forgotten-time', (req, res) => {
+  try {
+    const { employeeId, date, startTime, endTime, reason } = req.body || {};
+    const employee = findEmployeeById(String(employeeId || ''));
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee not found.' });
+
+    if (!isValidDateKey(date) || Number.isNaN(Date.parse(date))) {
+      return res.status(400).json({ success: false, error: 'Valid date is required.' });
+    }
+    const today = dateKeyNow();
+    if (date > today) return res.status(400).json({ success: false, error: 'Future dates are not allowed.' });
+
+    const s = parseHm(startTime);
+    const e = parseHm(endTime);
+    if (s === null || e === null) return res.status(400).json({ success: false, error: 'Valid start and end time are required.' });
+    if (s >= e) return res.status(400).json({ success: false, error: 'Start time must be before end time.' });
+    if (e - s > 16 * 60) return res.status(400).json({ success: false, error: 'A single request cannot exceed 16 hours.' });
+
+    const now = new Date();
+    if (date === today && e > now.getHours() * 60 + now.getMinutes()) {
+      return res.status(400).json({ success: false, error: 'End time cannot be in the future.' });
+    }
+
+    const cleanReason = String(reason || '').trim().slice(0, 500);
+    if (cleanReason.length < 5) return res.status(400).json({ success: false, error: 'Please enter a reason (min 5 characters).' });
+
+    const all = readForgotten();
+    const clash = all.find(
+      (r) =>
+        r.employeeId === employee.id &&
+        r.date === date &&
+        (r.status === 'pending' || r.status === 'approved') &&
+        s < parseHm(r.endTime) &&
+        parseHm(r.startTime) < e
+    );
+    if (clash) {
+      return res.status(409).json({ success: false, error: 'Overlaps an existing ' + clash.status + ' request (' + clash.startTime + '-' + clash.endTime + ').' });
+    }
+
+    const trackedClash = readArray(ACTIVITY_SNAPSHOTS_DB, 'activity snapshots').some((i) => {
+      if (i.employeeId !== employee.id || i.dateKey !== date) return false;
+      const d = new Date(i.capturedAt);
+      if (Number.isNaN(d.getTime())) return false;
+      const m = d.getHours() * 60 + d.getMinutes();
+      return m >= s && m < e;
+    });
+    if (trackedClash) {
+      return res.status(409).json({ success: false, error: 'This period overlaps time that was already tracked.' });
+    }
+
+    const request = {
+      id: randomUUID(),
+      employeeId: employee.id,
+      employeeName: getEmployeeFullName(employee),
+      date,
+      startTime,
+      endTime,
+      requestedSeconds: (e - s) * 60,
+      reason: cleanReason,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      adminId: null,
+      adminResponse: '',
+      decidedAt: null,
+      approvedSeconds: 0,
+    };
+    all.push(request);
+    saveForgotten(all);
+    return res.json({ success: true, request });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Employee: own requests only
+app.get('/api/forgotten-time/employee/:employeeId', (req, res) => {
+  try {
+    const employee = findEmployeeById(req.params.employeeId);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee not found.' });
+    const requests = readForgotten()
+      .filter((r) => r.employeeId === employee.id)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return res.json({ success: true, requests });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: list with filters
+app.get('/api/admin/forgotten-time', requireAdmin, (req, res) => {
+  try {
+    const { status, employeeId, date } = req.query;
+    const requests = readForgotten()
+      .filter((r) => !status || r.status === status)
+      .filter((r) => !employeeId || r.employeeId === employeeId)
+      .filter((r) => !date || r.date === date)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return res.json({ success: true, requests });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: approve (idempotent - only pending can change)
+app.post('/api/admin/forgotten-time/:id/approve', requireAdmin, (req, res) => {
+  try {
+    const all = readForgotten();
+    const request = all.find((r) => r.id === req.params.id);
+    if (!request) return res.status(404).json({ success: false, error: 'Request not found.' });
+    if (request.status !== 'pending') {
+      return res.status(409).json({ success: false, error: 'Request is already ' + request.status + '.', request });
+    }
+    request.status = 'approved';
+    request.adminId = 'admin-master';
+    request.decidedAt = new Date().toISOString();
+    request.approvedSeconds = Number(request.requestedSeconds) || 0;
+    request.adminResponse = String((req.body && req.body.response) || '').trim().slice(0, 500);
+    saveForgotten(all);
+    return res.json({ success: true, request });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: decline
+app.post('/api/admin/forgotten-time/:id/decline', requireAdmin, (req, res) => {
+  try {
+    const reason = String((req.body && req.body.reason) || '').trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ success: false, error: 'Decline reason is required.' });
+    const all = readForgotten();
+    const request = all.find((r) => r.id === req.params.id);
+    if (!request) return res.status(404).json({ success: false, error: 'Request not found.' });
+    if (request.status !== 'pending') {
+      return res.status(409).json({ success: false, error: 'Request is already ' + request.status + '.', request });
+    }
+    request.status = 'declined';
+    request.adminId = 'admin-master';
+    request.decidedAt = new Date().toISOString();
+    request.approvedSeconds = 0;
+    request.adminResponse = reason;
+    saveForgotten(all);
+    return res.json({ success: true, request });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // ======================================================
 // BASIC HELPERS
@@ -770,21 +1012,57 @@ function getImageFiles(
     .reverse();
 }
 
-function getScreenshotCount(
-  employee,
-  dateKey
-) {
-  return getImageFiles(
-    employeeDateFolder(
-      employee,
-      dateKey
-    )
-  ).length;
-}
+// function getScreenshotCount(
+//   employee,
+//   dateKey
+// ) {
+//   return getImageFiles(
+//     employeeDateFolder(
+//       employee,
+//       dateKey
+//     )
+//   ).length;
+// }
 
 // ======================================================
 // FIND ALL DATES FOR EMPLOYEE
 // ======================================================
+function getScreenshotCount(employee, dateKey) {
+  if (!employee || !employee.id || !isValidDateKey(dateKey)) {
+    return 0;
+  }
+
+  const screenshotKeys = new Set();
+
+  // Count uploaded screenshot files.
+  const imageFiles = getImageFiles(
+    employeeDateFolder(employee, dateKey)
+  );
+
+  imageFiles.forEach((fileName) => {
+    screenshotKeys.add(String(fileName).toLowerCase());
+  });
+
+  // Include activity snapshot records.
+  const snapshots = readArray(
+    ACTIVITY_SNAPSHOTS_DB,
+    'activity snapshots'
+  );
+
+  snapshots.forEach((item) => {
+    if (
+      item.employeeId === employee.id &&
+      item.dateKey === dateKey &&
+      item.screenshotKey
+    ) {
+      screenshotKeys.add(
+        String(item.screenshotKey).toLowerCase()
+      );
+    }
+  });
+
+  return screenshotKeys.size;
+}
 
 function getEmployeeDateFolders(
   employee
@@ -2916,134 +3194,247 @@ app.get(
 // ACTIVITY HISTORY
 // ======================================================
 
+// app.get(
+//   '/api/activity-history/:employeeId',
+//   (
+//     req,
+//     res
+//   ) => {
+//     try {
+//       const employee =
+//         findEmployeeById(
+//           req.params.employeeId
+//         );
+
+//       if (
+//         !employee
+//       ) {
+//         return res
+//           .status(
+//             404
+//           )
+//           .json({
+//             success:
+//               false,
+
+//             error:
+//               'Employee not found.',
+//           });
+//       }
+
+//       const tracker =
+//         readTracker();
+
+//       const trackerDates =
+//         Object.keys(
+//           tracker[
+//             employee.id
+//           ]?.dates ||
+//             {}
+//         );
+
+//       const screenshotDates =
+//         getEmployeeDateFolders(
+//           employee
+//         );
+
+//       const dates =
+//         Array.from(
+//           new Set([
+//             ...trackerDates,
+//             ...screenshotDates,
+//           ])
+//         )
+//           .sort()
+//           .reverse();
+
+//       const records =
+//         dates.map(
+//           (
+//             dateKey
+//           ) => ({
+//             dateKey,
+
+//             totalSeconds:
+//               Number(
+//                 tracker[
+//                   employee.id
+//                 ]?.dates?.[
+//                   dateKey
+//                 ]?.totalSeconds ||
+//                   0
+//               ),
+
+//             screenshotCount:
+//               getScreenshotCount(
+//                 employee,
+//                 dateKey
+//               ),
+//           })
+//         );
+
+//       return res.json({
+//         success:
+//           true,
+
+//         employee: {
+//           id:
+//             employee.id,
+
+//           firstName:
+//             employee.firstName ||
+//             '',
+
+//           lastName:
+//             employee.lastName ||
+//             '',
+
+//           name:
+//             getEmployeeFullName(
+//               employee
+//             ),
+
+//           email:
+//             employee.email,
+//         },
+
+//         records,
+//       });
+//     } catch (
+//       error
+//     ) {
+//       console.error(
+//         'History error:',
+//         error
+//       );
+
+//       return res
+//         .status(
+//           500
+//         )
+//         .json({
+//           success:
+//             false,
+
+//           error:
+//             error.message,
+//         });
+//     }
+//   }
+// );
+
 app.get(
   '/api/activity-history/:employeeId',
-  (
-    req,
-    res
-  ) => {
+  (req, res) => {
     try {
-      const employee =
-        findEmployeeById(
-          req.params.employeeId
-        );
+      const employee = findEmployeeById(
+        req.params.employeeId
+      );
 
-      if (
-        !employee
-      ) {
-        return res
-          .status(
-            404
-          )
-          .json({
-            success:
-              false,
-
-            error:
-              'Employee not found.',
-          });
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          error: 'Employee not found.',
+        });
       }
 
-      const tracker =
-        readTracker();
+      const tracker = readTracker();
 
-      const trackerDates =
-        Object.keys(
-          tracker[
-            employee.id
-          ]?.dates ||
-            {}
-        );
+      // Get all activity snapshots for this employee.
+      const activitySnapshots = readArray(
+        ACTIVITY_SNAPSHOTS_DB,
+        'activity snapshots'
+      ).filter(
+        (item) => item.employeeId === employee.id
+      );
+
+      // Get dates from all available data sources.
+      const trackerDates = Object.keys(
+        tracker[employee.id]?.dates || {}
+      );
 
       const screenshotDates =
-        getEmployeeDateFolders(
-          employee
+        getEmployeeDateFolders(employee);
+
+      const activityDates = activitySnapshots
+        .map((item) => item.dateKey)
+        .filter(isValidDateKey);
+
+      const dates = Array.from(
+        new Set([
+          ...trackerDates,
+          ...screenshotDates,
+          ...activityDates,
+        ])
+      )
+        .filter(isValidDateKey)
+        .sort()
+        .reverse();
+
+      // Prepare daily activity and screenshot report.
+      const records = dates.map((dateKey) => {
+        const daySnapshots = activitySnapshots.filter(
+          (item) => item.dateKey === dateKey
         );
 
-      const dates =
-        Array.from(
-          new Set([
-            ...trackerDates,
-            ...screenshotDates,
-          ])
-        )
-          .sort()
-          .reverse();
+        const sum = (key) =>
+          daySnapshots.reduce(
+            (total, item) =>
+              total +
+              Math.max(0, Number(item[key]) || 0),
+            0
+          );
 
-      const records =
-        dates.map(
-          (
+        return {
+          dateKey,
+
+          totalSeconds: Number(
+            tracker[employee.id]?.dates?.[dateKey]
+              ?.totalSeconds || 0
+          ),
+
+          screenshotCount: getScreenshotCount(
+            employee,
             dateKey
-          ) => ({
-            dateKey,
+          ),
 
-            totalSeconds:
-              Number(
-                tracker[
-                  employee.id
-                ]?.dates?.[
-                  dateKey
-                ]?.totalSeconds ||
-                  0
-              ),
+          activeSeconds: sum('activeSeconds'),
+          trackedSeconds: sum('trackedSeconds'),
 
-            screenshotCount:
-              getScreenshotCount(
-                employee,
-                dateKey
-              ),
-          })
-        );
+          mouseMoves: sum('mouseMoves'),
+          mouseClicks: sum('mouseClicks'),
+          keyPresses: sum('keyPresses'),
+        };
+      });
 
       return res.json({
-        success:
-          true,
+        success: true,
 
         employee: {
-          id:
-            employee.id,
+          id: employee.id,
 
-          firstName:
-            employee.firstName ||
-            '',
+          firstName: employee.firstName || '',
 
-          lastName:
-            employee.lastName ||
-            '',
+          lastName: employee.lastName || '',
 
-          name:
-            getEmployeeFullName(
-              employee
-            ),
+          name: getEmployeeFullName(employee),
 
-          email:
-            employee.email,
+          email: employee.email,
         },
 
         records,
       });
-    } catch (
-      error
-    ) {
-      console.error(
-        'History error:',
-        error
-      );
+    } catch (error) {
+      console.error('History error:', error);
 
-      return res
-        .status(
-          500
-        )
-        .json({
-          success:
-            false,
-
-          error:
-            error.message,
-        });
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
     }
   }
 );
+
 
 // ======================================================
 // ADMIN SUMMARY

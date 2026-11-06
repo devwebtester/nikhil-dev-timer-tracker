@@ -1,8 +1,13 @@
 import React, {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
+import { PaginationControls, usePagination } from './ScreenshotPagination';
+import { MyTimeTracking, type ViewMode } from './MyTimeTracking';
+import { AdminForgottenTime } from './ForgottenTime';
+import { getTodayDateKey } from '../lib/utils';
 
 import {
   AppUser,
@@ -22,6 +27,9 @@ import {
 } from 'lucide-react';
 
 import { apiFetch } from '../lib/api';
+import { ReportExportButtons } from './ReportExportButtons';
+import { TimeActivityReport } from './TimeActivityReport';
+import type { ReportRow } from '../lib/exportService';
 
 
 interface AdminDashboardProps {
@@ -30,39 +38,41 @@ interface AdminDashboardProps {
   allUsers: AppUser[];
 
   onUpdateUsers:
-    (users: AppUser[]) => void;
+  (users: AppUser[]) => void;
 
   pendingSignups:
-    PendingSignup[];
+  PendingSignup[];
 
   onUpdatePendingSignups:
-    (signups: PendingSignup[]) => void;
+  (signups: PendingSignup[]) => void;
 
   storageSettings:
-    StorageSettings;
+  StorageSettings;
 
   onUpdateStorageSettings:
-    (settings: StorageSettings) => void;
+  (settings: StorageSettings) => void;
 
   allScreenshots:
-    ScreenshotLog[];
+  ScreenshotLog[];
 
   onUpdateScreenshots?:
-    (screens: ScreenshotLog[]) => void;
+  (screens: ScreenshotLog[]) => void;
 
   accessToken:
-    string | null;
+  string | null;
 
   onConnectDrive:
-    () => void;
+  () => void;
 }
 
 
 type AdminTab =
   | 'employees'
+  | 'reports'
   | 'approvals'
   | 'activity'
-  | 'storage';
+  | 'storage'
+  | 'forgotten';
 
 
 type ActivitySummaryRow = {
@@ -78,10 +88,21 @@ type ActivitySummaryRow = {
 };
 
 
+// type ActivityHistoryRow = {
+//   dateKey: string;
+//   totalSeconds: number;
+//   screenshotCount: number;
+// };
 type ActivityHistoryRow = {
   dateKey: string;
   totalSeconds: number;
   screenshotCount: number;
+  activeSeconds?: number;
+  trackedSeconds?: number;
+  mouseMoves?: number;
+  mouseClicks?: number;
+  keyPresses?: number;
+  approvedSeconds?: number;
 };
 
 
@@ -103,15 +124,15 @@ type ScreenshotItem = {
   //   mouseClicks: number;
   //   keyPresses: number;
   // };
-  
-activityCounts?: {
-  mouseMoves: number;
-  mouseClicks: number;
-  keyPresses: number;
-  activityPercent?: number;
-  activeSeconds?: number;
-  trackedSeconds?: number;
-};
+
+  activityCounts?: {
+    mouseMoves: number;
+    mouseClicks: number;
+    keyPresses: number;
+    activityPercent?: number;
+    activeSeconds?: number;
+    trackedSeconds?: number;
+  };
 
 };
 
@@ -188,10 +209,9 @@ const readApiJson = async (
 
     throw new Error(
       `Backend returned non-JSON response (${response.status}). ` +
-      `${
-        preview
-          ? `Response: ${preview}`
-          : ''
+      `${preview
+        ? `Response: ${preview}`
+        : ''
       }`
     );
   }
@@ -227,182 +247,194 @@ const readAdminBootstrap = () => {
 ========================================================================== */
 
 export const AdminDashboard:
-React.FC<AdminDashboardProps> = ({
+  React.FC<AdminDashboardProps> = ({
 
-  adminUser,
+    adminUser,
 
-  allUsers,
+    allUsers,
 
-  onUpdateUsers,
+    onUpdateUsers,
 
-  pendingSignups,
+    pendingSignups,
 
-  onUpdatePendingSignups,
+    onUpdatePendingSignups,
 
-  storageSettings,
+    storageSettings,
 
-  onUpdateStorageSettings,
+    onUpdateStorageSettings,
 
-}) => {
+  }) => {
 
-  const captureEditingRef =
-    useRef(false);
+    const captureEditingRef =
+      useRef(false);
 
-  const activityRequestRef =
-    useRef(0);
+    const activityRequestRef =
+      useRef(0);
 
+    // My Time Tracking (view only)
+    const [adminViewMode, setAdminViewMode] =
+      useState<ViewMode>('day');
 
-  const [
-    activeTab,
-    setActiveTab,
-  ] =
-    useState<AdminTab>(
-      'employees'
-    );
+    // Employee whose history rows are loaded. The card is only shown for that
+    // employee, so a date can never be picked while the history is still loading.
+    const [historyReadyFor, setHistoryReadyFor] =
+      useState<string>('');
 
-
-  const bootstrap = readAdminBootstrap();
-
-  const [
-    centralUsers,
-    setCentralUsers,
-  ] =
-    useState<AppUser[]>(
-      Array.isArray(bootstrap?.employees)
-        ? bootstrap.employees.map((employee: any) => ({ ...employee, role: 'employee', approved: employee.approved !== false }))
-        : allUsers.filter((u) => u.role === 'employee')
-    );
+    const latestEmployeeIdRef = useRef('');
+    const latestDateRef = useRef('');
 
 
-  const [
-    centralPending,
-    setCentralPending,
-  ] =
-    useState<any[]>(
-      Array.isArray(bootstrap?.pending) ? bootstrap.pending : (pendingSignups || [])
-    );
+    const [
+      activeTab,
+      setActiveTab,
+    ] =
+      useState<AdminTab>(
+        'employees'
+      );
 
 
-  const [
-    summaryRows,
-    setSummaryRows,
-  ] =
-    useState<ActivitySummaryRow[]>(
-      Array.isArray(bootstrap?.summary) ? bootstrap.summary : []
-    );
+    const bootstrap = readAdminBootstrap();
+
+    const [
+      centralUsers,
+      setCentralUsers,
+    ] =
+      useState<AppUser[]>(
+        Array.isArray(bootstrap?.employees)
+          ? bootstrap.employees.map((employee: any) => ({ ...employee, role: 'employee', approved: employee.approved !== false }))
+          : allUsers.filter((u) => u.role === 'employee')
+      );
 
 
-  const [
-    selectedEmployeeId,
-    setSelectedEmployeeId,
-  ] =
-    useState<string>('');
+    const [
+      centralPending,
+      setCentralPending,
+    ] =
+      useState<any[]>(
+        Array.isArray(bootstrap?.pending) ? bootstrap.pending : (pendingSignups || [])
+      );
 
 
-  const [
-    historyRows,
-    setHistoryRows,
-  ] =
-    useState<ActivityHistoryRow[]>(
-      []
-    );
+    const [
+      summaryRows,
+      setSummaryRows,
+    ] =
+      useState<ActivitySummaryRow[]>(
+        Array.isArray(bootstrap?.summary) ? bootstrap.summary : []
+      );
 
 
-  const [
-    selectedDate,
-    setSelectedDate,
-  ] =
-    useState<string>('');
+    const [
+      selectedEmployeeId,
+      setSelectedEmployeeId,
+    ] =
+      useState<string>('');
 
 
-  const [
-    selectedHistoryYear,
-    setSelectedHistoryYear
-  ] =
-    useState<string>(
-      new Date()
-        .getFullYear()
-        .toString()
-    );
+    const [
+      historyRows,
+      setHistoryRows,
+    ] =
+      useState<ActivityHistoryRow[]>(
+        []
+      );
 
 
-  const [
-    selectedHistoryMonth,
-    setSelectedHistoryMonth
-  ] =
-    useState<string>(
-      new Date()
-        .toISOString()
-        .slice(0, 7)
-    );
+    const [
+      selectedDate,
+      setSelectedDate,
+    ] =
+      useState<string>('');
 
 
-  const [
-    selectedActivity,
-    setSelectedActivity,
-  ] =
-    useState<any>(null);
+    const [
+      selectedHistoryYear,
+      setSelectedHistoryYear
+    ] =
+      useState<string>(
+        new Date()
+          .getFullYear()
+          .toString()
+      );
 
 
-  const [
-    previewImage,
-    setPreviewImage,
-  ] =
-    useState<ScreenshotItem | null>(
-      null
-    );
+    const [
+      selectedHistoryMonth,
+      setSelectedHistoryMonth
+    ] =
+      useState<string>(
+        new Date()
+          .toISOString()
+          .slice(0, 7)
+      );
 
 
-  const [
-    loading,
-    setLoading,
-  ] =
-    useState(false);
+    const [
+      selectedActivity,
+      setSelectedActivity,
+    ] =
+      useState<any>(null);
 
 
-  const [
-    message,
-    setMessage,
-  ] =
-    useState('');
+    const [
+      previewImage,
+      setPreviewImage,
+    ] =
+      useState<ScreenshotItem | null>(
+        null
+      );
 
 
-  /* ==========================================================================
-     CAPTURE SETTINGS STATE
-  ========================================================================== */
-
-  const [
-    captureMode,
-    setCaptureMode,
-  ] =
-    useState<string>(
-      'random_count_window'
-    );
+    const [
+      loading,
+      setLoading,
+    ] =
+      useState(false);
 
 
-  const [
-    captureIntervalSeconds,
-    setCaptureIntervalSeconds,
-  ] =
-    useState<number>(
-      storageSettings
-        .captureIntervalSeconds ||
+    const [
+      message,
+      setMessage,
+    ] =
+      useState('');
+
+
+    /* ==========================================================================
+       CAPTURE SETTINGS STATE
+    ========================================================================== */
+
+    const [
+      captureMode,
+      setCaptureMode,
+    ] =
+      useState<string>(
+        'random_count_window'
+      );
+
+
+    const [
+      captureIntervalSeconds,
+      setCaptureIntervalSeconds,
+    ] =
+      useState<number>(
+        storageSettings
+          .captureIntervalSeconds ||
         600
-    );
+      );
 
 
-  const [
-    allowedIntervals,
-    setAllowedIntervals,
-  ] =
-    useState<number[]>(
-      storageSettings
-        .allowedIntervals?.length
+    const [
+      allowedIntervals,
+      setAllowedIntervals,
+    ] =
+      useState<number[]>(
+        storageSettings
+          .allowedIntervals?.length
 
-        ? storageSettings
+          ? storageSettings
             .allowedIntervals
 
-        : [
+          : [
             10,
             60,
             120,
@@ -410,603 +442,273 @@ React.FC<AdminDashboardProps> = ({
             600,
             900,
           ]
-    );
+      );
 
 
-  const [
-    lockIntervalForEmployees,
-    setLockIntervalForEmployees,
-  ] =
-    useState<boolean>(
-      storageSettings
-        .lockIntervalForEmployees !==
+    const [
+      lockIntervalForEmployees,
+      setLockIntervalForEmployees,
+    ] =
+      useState<boolean>(
+        storageSettings
+          .lockIntervalForEmployees !==
         false
-    );
+      );
 
 
-  const [
-    captureWindowSeconds,
-    setCaptureWindowSeconds,
-  ] =
-    useState<number>(600);
+    const [
+      captureWindowSeconds,
+      setCaptureWindowSeconds,
+    ] =
+      useState<number>(600);
 
 
-  const [
-    screenshotsPerWindow,
-    setScreenshotsPerWindow,
-  ] =
-    useState<number>(5);
+    const [
+      screenshotsPerWindow,
+      setScreenshotsPerWindow,
+    ] =
+      useState<number>(5);
 
 
-  const [
-    presetId,
-    setPresetId,
-  ] =
-    useState<string>(
-      '10m-5'
-    );
+    const [
+      presetId,
+      setPresetId,
+    ] =
+      useState<string>(
+        '10m-5'
+      );
 
 
-  const [
-    customMinutes,
-    setCustomMinutes,
-  ] =
-    useState<number>(10);
+    const [
+      customMinutes,
+      setCustomMinutes,
+    ] =
+      useState<number>(10);
 
 
-  const [
-    customScreenshots,
-    setCustomScreenshots,
-  ] =
-    useState<number>(20);
+    const [
+      customScreenshots,
+      setCustomScreenshots,
+    ] =
+      useState<number>(20);
 
 
-  // Login already provided the initial admin data. Do not start polling.
-  useEffect(() => {
-    const cached = readAdminBootstrap();
-    if (!cached) return;
+    // Login already provided the initial admin data. Do not start polling.
+    useEffect(() => {
+      const cached = readAdminBootstrap();
+      if (!cached) return;
 
-    if (Array.isArray(cached.employees)) {
-      const employees = cached.employees.map((employee: any) => ({
-        ...employee,
-        role: 'employee',
-        approved: employee.approved !== false,
-      }));
-      setCentralUsers(employees);
-      const nonEmployees = allUsers.filter((u) => u.role !== 'employee');
-      onUpdateUsers([...nonEmployees, ...employees]);
-    }
-
-    if (Array.isArray(cached.pending)) {
-      setCentralPending(cached.pending);
-      onUpdatePendingSignups(cached.pending);
-    }
-
-    if (cached.captureSettings) {
-      const settings = cached.captureSettings;
-      setCaptureMode(settings.captureMode || 'random_count_window');
-      setCaptureIntervalSeconds(Number(settings.captureIntervalSeconds || settings.captureWindowSeconds || 600));
-      setAllowedIntervals(settings.allowedIntervals || []);
-      setLockIntervalForEmployees(settings.lockIntervalForEmployees !== false);
-      setCaptureWindowSeconds(Math.max(5, Number(settings.captureWindowSeconds || 600)));
-      setScreenshotsPerWindow(Math.max(1, Number(settings.screenshotsPerWindow || 5)));
-      setPresetId(String(settings.presetId || 'custom'));
-    }
-  }, []);
-
-  /* ==========================================================================
-     FLASH MESSAGE
-  ========================================================================== */
-
-  const flash = (
-    text: string
-  ) => {
-
-    setMessage(text);
-
-
-    window.setTimeout(
-      () =>
-        setMessage(''),
-      30000
-    );
-  };
-
-
-  /* ==========================================================================
-     LOAD EMPLOYEES
-  ========================================================================== */
-
-  const loadEmployees =
-    async () => {
-
-      const response =
-        await apiFetch(
-          '/api/employees',
-          {
-            method: 'GET',
-            cache: 'no-store',
-          }
-        );
-
-
-      const data =
-        await readApiJson(
-          response
-        );
-
-
-      if (
-        !response.ok ||
-        !data?.success
-      ) {
-
-        throw new Error(
-          data?.error ||
-          'Failed to load employees'
-        );
+      if (Array.isArray(cached.employees)) {
+        const employees = cached.employees.map((employee: any) => ({
+          ...employee,
+          role: 'employee',
+          approved: employee.approved !== false,
+        }));
+        setCentralUsers(employees);
+        const nonEmployees = allUsers.filter((u) => u.role !== 'employee');
+        onUpdateUsers([...nonEmployees, ...employees]);
       }
 
+      if (Array.isArray(cached.pending)) {
+        setCentralPending(cached.pending);
+        onUpdatePendingSignups(cached.pending);
+      }
 
-      const employees:
-        AppUser[] =
-        (data.employees || [])
-          .map(
-            (emp: any) => ({
-              ...emp,
+      if (cached.captureSettings) {
+        const settings = cached.captureSettings;
+        setCaptureMode(settings.captureMode || 'random_count_window');
+        setCaptureIntervalSeconds(Number(settings.captureIntervalSeconds || settings.captureWindowSeconds || 600));
+        setAllowedIntervals(settings.allowedIntervals || []);
+        setLockIntervalForEmployees(settings.lockIntervalForEmployees !== false);
+        setCaptureWindowSeconds(Math.max(5, Number(settings.captureWindowSeconds || 600)));
+        setScreenshotsPerWindow(Math.max(1, Number(settings.screenshotsPerWindow || 5)));
+        setPresetId(String(settings.presetId || 'custom'));
+      }
+    }, []);
 
-              role:
-                'employee',
+    /* ==========================================================================
+       FLASH MESSAGE
+    ========================================================================== */
 
-              approved:
-                emp.approved !==
-                false,
-            })
+    const flash = (
+      text: string
+    ) => {
+
+      setMessage(text);
+
+
+      window.setTimeout(
+        () =>
+          setMessage(''),
+        30000
+      );
+    };
+
+
+    /* ==========================================================================
+       LOAD EMPLOYEES
+    ========================================================================== */
+
+    const loadEmployees =
+      async () => {
+
+        const response =
+          await apiFetch(
+            '/api/employees',
+            {
+              method: 'GET',
+              cache: 'no-store',
+            }
           );
 
 
-      setCentralUsers(
-        employees
-      );
+        const data =
+          await readApiJson(
+            response
+          );
 
 
-      const nonEmployees =
-        allUsers.filter(
-          (u) =>
-            u.role !==
-            'employee'
-        );
+        if (
+          !response.ok ||
+          !data?.success
+        ) {
 
-
-      onUpdateUsers([
-        ...nonEmployees,
-        ...employees,
-      ]);
-
-
-      setSelectedEmployeeId(
-        (
-          previousEmployeeId
-        ) => {
-
-          if (
-            previousEmployeeId &&
-            employees.some(
-              (employee) =>
-                employee.id ===
-                previousEmployeeId
-            )
-          ) {
-
-            return previousEmployeeId;
-
-          }
-
-
-          return employees.length > 0
-            ? employees[0].id
-            : '';
+          throw new Error(
+            data?.error ||
+            'Failed to load employees'
+          );
         }
-      );
-    };
 
 
-  /* ==========================================================================
-     LOAD PENDING
-  ========================================================================== */
+        const employees:
+          AppUser[] =
+          (data.employees || [])
+            .map(
+              (emp: any) => ({
+                ...emp,
 
-  const loadPending =
-    async () => {
+                role:
+                  'employee',
 
-      const response =
-        await apiFetch(
-          '/api/pending-employees',
-          {
-            method: 'GET',
-            cache: 'no-store',
-          }
+                approved:
+                  emp.approved !==
+                  false,
+              })
+            );
+
+
+        setCentralUsers(
+          employees
         );
 
 
-      const data =
-        await readApiJson(
-          response
-        );
+        const nonEmployees =
+          allUsers.filter(
+            (u) =>
+              u.role !==
+              'employee'
+          );
 
 
-      if (
-        !response.ok ||
-        !data?.success
-      ) {
-
-        throw new Error(
-          data?.error ||
-          'Failed to load pending requests'
-        );
-      }
-
-
-      const pending =
-        data.pending || [];
-
-
-      setCentralPending(
-        pending
-      );
-
-
-      onUpdatePendingSignups(
-        pending
-      );
-    };
-
-  /* ==========================================================================
-     LOAD SUMMARY
-  ========================================================================== */
-
-  const loadSummary =
-    async () => {
-
-      const monthKey =
-        new Date()
-          .toISOString()
-          .slice(0, 7);
-
-
-      const response =
-        await apiFetch(
-          `/api/admin/activity-summary?month=${encodeURIComponent(
-            monthKey
-          )}`,
-          {
-            method: 'GET',
-            cache: 'no-store',
-          }
-        );
-
-
-      const data =
-        await readApiJson(
-          response
-        );
-
-
-      if (
-        !response.ok ||
-        !data?.success
-      ) {
-
-        throw new Error(
-          data?.error ||
-          'Failed to load activity summary'
-        );
-      }
-
-
-      setSummaryRows(
-        data.employees || []
-      );
-    };
-
-
-  /* ==========================================================================
-     LOAD CAPTURE SETTINGS
-  ========================================================================== */
-
-  const loadCaptureSettings =
-    async (
-      force = false
-    ) => {
-
-      if (
-        captureEditingRef.current &&
-        !force
-      ) {
-        return;
-      }
-
-
-      const response =
-        await apiFetch(
-          '/api/capture-settings',
-          {
-            method: 'GET',
-            cache: 'no-store',
-          }
-        );
-
-
-      const data =
-        await readApiJson(
-          response
-        );
-
-
-      if (
-        !response.ok ||
-        !data?.success
-      ) {
-
-        throw new Error(
-          data?.error ||
-          'Failed to load capture settings'
-        );
-      }
-
-
-      const settings =
-        data.settings || {};
-
-
-      setCaptureMode(
-        settings.captureMode ||
-        'random_count_window'
-      );
-
-
-      setCaptureIntervalSeconds(
-        Number(
-          settings
-            .captureIntervalSeconds ||
-          settings
-            .captureWindowSeconds ||
-          600
-        )
-      );
-
-
-      setAllowedIntervals(
-        settings.allowedIntervals ||
-        []
-      );
-
-
-      setLockIntervalForEmployees(
-        settings
-          .lockIntervalForEmployees !==
-          false
-      );
-
-
-      setCaptureWindowSeconds(
-        Math.max(
-          5,
-          Number(
-            settings
-              .captureWindowSeconds ||
-            600
-          )
-        )
-      );
-
-
-      setScreenshotsPerWindow(
-        Math.max(
-          1,
-          Number(
-            settings
-              .screenshotsPerWindow ||
-            5
-          )
-        )
-      );
-
-
-      setPresetId(
-        String(
-          settings.presetId ||
-          'custom'
-        )
-      );
-
-
-      if (
-        settings.presetId ===
-        'custom'
-      ) {
-
-        setCustomMinutes(
-          Math.max(
-            1,
-            Math.round(
-              Number(
-                settings
-                  .captureWindowSeconds ||
-                600
-              ) / 60
-            )
-          )
-        );
-
-
-        setCustomScreenshots(
-          Math.max(
-            1,
-            Number(
-              settings
-                .screenshotsPerWindow ||
-              5
-            )
-          )
-        );
-      }
-    };
-
-
-  /* ==========================================================================
-     REFRESH CENTRAL DATA
-  ========================================================================== */
-
-  const refreshCentralData =
-    async (
-      silent = false
-    ) => {
-
-      if (!silent) {
-        setLoading(true);
-      }
-
-
-      try {
-
-        await Promise.all([
-          loadEmployees(),
-          loadPending(),
-          loadSummary(),
-          loadCaptureSettings(),
+        onUpdateUsers([
+          ...nonEmployees,
+          ...employees,
         ]);
 
-      } catch (err: any) {
 
-        if (!silent) {
-          flash(
-            `❌ ${err.message}`
-          );
-        }
+        setSelectedEmployeeId(
+          (
+            previousEmployeeId
+          ) => {
 
-      } finally {
+            if (
+              previousEmployeeId &&
+              employees.some(
+                (employee) =>
+                  employee.id ===
+                  previousEmployeeId
+              )
+            ) {
 
-        if (!silent) {
-          setLoading(false);
-        }
+              return previousEmployeeId;
 
-      }
-    };
-
-
-  /* ==========================================================================
-     INITIAL ADMIN LOAD
-  ========================================================================== */
-
-  // Refresh the activity summary once per minute while the Admin dashboard
-  // is open. This is one lightweight request per minute and lets the Admin
-  // see employee timer syncs without logging out or manually refreshing.
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void loadSummary().catch((error) => {
-        console.warn('Admin activity summary refresh failed:', error);
-      });
-    }, 60 * 1000);
-
-    return () => window.clearInterval(timer);
-    // loadSummary is recreated on render; this timer intentionally uses the
-    // stable dashboard lifetime and reads the latest API data on each tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+            }
 
 
-  /* ==========================================================================
-     INITIAL PENDING APPROVALS LOAD
-  ========================================================================== */
-
-  // Login bootstrap provides the initial UI immediately.
-  // Fetch the latest pending signup requests once when the admin dashboard
-  // opens. This is NOT polling. It ensures a signup submitted after the
-  // admin logged in appears without requiring logout/login.
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadInitialPending = async () => {
-      try {
-        const response = await apiFetch(
-          '/api/pending-employees',
-          {
-            method: 'GET',
-            cache: 'no-store',
+            return employees.length > 0
+              ? employees[0].id
+              : '';
           }
         );
+      };
 
-        const data = await readApiJson(response);
 
-        if (!response.ok || !data?.success) {
+    /* ==========================================================================
+       LOAD PENDING
+    ========================================================================== */
+
+    const loadPending =
+      async () => {
+
+        const response =
+          await apiFetch(
+            '/api/pending-employees',
+            {
+              method: 'GET',
+              cache: 'no-store',
+            }
+          );
+
+
+        const data =
+          await readApiJson(
+            response
+          );
+
+
+        if (
+          !response.ok ||
+          !data?.success
+        ) {
+
           throw new Error(
             data?.error ||
             'Failed to load pending requests'
           );
         }
 
-        if (cancelled) {
-          return;
-        }
 
         const pending =
-          Array.isArray(data.pending)
-            ? data.pending
-            : [];
-
-        setCentralPending(pending);
-        onUpdatePendingSignups(pending);
-      } catch (error) {
-        if (!cancelled) {
-          console.error(
-            'Initial pending signup refresh failed:',
-            error
-          );
-        }
-      }
-    };
-
-    void loadInitialPending();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+          data.pending || [];
 
 
-  /* ==========================================================================
-     LOAD EMPLOYEE HISTORY
-  ========================================================================== */
-
-  const loadEmployeeHistory =
-    async (
-      employeeId: string
-    ) => {
-
-      if (!employeeId) {
-
-        setHistoryRows([]);
-
-        setSelectedDate('');
-
-        setSelectedActivity(
-          null
+        setCentralPending(
+          pending
         );
 
-        return;
-      }
 
+        onUpdatePendingSignups(
+          pending
+        );
+      };
 
-      const requestId =
-        ++activityRequestRef.current;
+    /* ==========================================================================
+       LOAD SUMMARY
+    ========================================================================== */
 
+    const loadSummary =
+      async () => {
 
-      try {
+        const monthKey =
+          new Date()
+            .toISOString()
+            .slice(0, 7);
+
 
         const response =
           await apiFetch(
-            `/api/activity-history/${encodeURIComponent(
-              employeeId
+            `/api/admin/activity-summary?month=${encodeURIComponent(
+              monthKey
             )}`,
             {
               method: 'GET',
@@ -1028,81 +730,567 @@ React.FC<AdminDashboardProps> = ({
 
           throw new Error(
             data?.error ||
-            'Failed to load activity history'
+            'Failed to load activity summary'
           );
         }
 
 
+        setSummaryRows(
+          data.employees || []
+        );
+      };
+
+
+    /* ==========================================================================
+       LOAD CAPTURE SETTINGS
+    ========================================================================== */
+
+    const loadCaptureSettings =
+      async (
+        force = false
+      ) => {
+
         if (
-          requestId !==
-          activityRequestRef.current
+          captureEditingRef.current &&
+          !force
         ) {
           return;
         }
 
 
-        const records:
-          ActivityHistoryRow[] =
-          Array.isArray(
-            data.records
-          )
-            ? data.records
-            : [];
+        const response =
+          await apiFetch(
+            '/api/capture-settings',
+            {
+              method: 'GET',
+              cache: 'no-store',
+            }
+          );
 
 
-        setHistoryRows(
-          records
-        );
+        const data =
+          await readApiJson(
+            response
+          );
 
-
-        setSelectedDate(
-          ''
-        );
-
-
-        setSelectedActivity(
-          null
-        );
-
-      } catch (err: any) {
 
         if (
-          requestId ===
-          activityRequestRef.current
+          !response.ok ||
+          !data?.success
         ) {
 
-          flash(
-            `❌ ${err.message}`
+          throw new Error(
+            data?.error ||
+            'Failed to load capture settings'
           );
         }
 
+
+        const settings =
+          data.settings || {};
+
+
+        setCaptureMode(
+          settings.captureMode ||
+          'random_count_window'
+        );
+
+
+        setCaptureIntervalSeconds(
+          Number(
+            settings
+              .captureIntervalSeconds ||
+            settings
+              .captureWindowSeconds ||
+            600
+          )
+        );
+
+
+        setAllowedIntervals(
+          settings.allowedIntervals ||
+          []
+        );
+
+
+        setLockIntervalForEmployees(
+          settings
+            .lockIntervalForEmployees !==
+          false
+        );
+
+
+        setCaptureWindowSeconds(
+          Math.max(
+            5,
+            Number(
+              settings
+                .captureWindowSeconds ||
+              600
+            )
+          )
+        );
+
+
+        setScreenshotsPerWindow(
+          Math.max(
+            1,
+            Number(
+              settings
+                .screenshotsPerWindow ||
+              5
+            )
+          )
+        );
+
+
+        setPresetId(
+          String(
+            settings.presetId ||
+            'custom'
+          )
+        );
+
+
+        if (
+          settings.presetId ===
+          'custom'
+        ) {
+
+          setCustomMinutes(
+            Math.max(
+              1,
+              Math.round(
+                Number(
+                  settings
+                    .captureWindowSeconds ||
+                  600
+                ) / 60
+              )
+            )
+          );
+
+
+          setCustomScreenshots(
+            Math.max(
+              1,
+              Number(
+                settings
+                  .screenshotsPerWindow ||
+                5
+              )
+            )
+          );
+        }
+      };
+
+
+    /* ==========================================================================
+       REFRESH CENTRAL DATA
+    ========================================================================== */
+
+    const refreshCentralData =
+      async (
+        silent = false
+      ) => {
+
+        if (!silent) {
+          setLoading(true);
+        }
+
+
+        try {
+
+          await Promise.all([
+            loadEmployees(),
+            loadPending(),
+            loadSummary(),
+            loadCaptureSettings(),
+          ]);
+
+        } catch (err: any) {
+
+          if (!silent) {
+            flash(
+              `❌ ${err.message}`
+            );
+          }
+
+        } finally {
+
+          if (!silent) {
+            setLoading(false);
+          }
+
+        }
+      };
+
+
+    /* ==========================================================================
+       INITIAL ADMIN LOAD
+    ========================================================================== */
+
+    // Refresh the activity summary once per minute while the Admin dashboard
+    // is open. This is one lightweight request per minute and lets the Admin
+    // see employee timer syncs without logging out or manually refreshing.
+    useEffect(() => {
+      const timer = window.setInterval(() => {
+        void loadSummary().catch((error) => {
+          console.warn('Admin activity summary refresh failed:', error);
+        });
+      }, 60 * 1000);
+
+      return () => window.clearInterval(timer);
+      // loadSummary is recreated on render; this timer intentionally uses the
+      // stable dashboard lifetime and reads the latest API data on each tick.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+
+    /* ==========================================================================
+       INITIAL PENDING APPROVALS LOAD
+    ========================================================================== */
+
+    // Login bootstrap provides the initial UI immediately.
+    // Fetch the latest pending signup requests once when the admin dashboard
+    // opens. This is NOT polling. It ensures a signup submitted after the
+    // admin logged in appears without requiring logout/login.
+    useEffect(() => {
+      let cancelled = false;
+
+      const loadInitialPending = async () => {
+        try {
+          const response = await apiFetch(
+            '/api/pending-employees',
+            {
+              method: 'GET',
+              cache: 'no-store',
+            }
+          );
+
+          const data = await readApiJson(response);
+
+          if (!response.ok || !data?.success) {
+            throw new Error(
+              data?.error ||
+              'Failed to load pending requests'
+            );
+          }
+
+          if (cancelled) {
+            return;
+          }
+
+          const pending =
+            Array.isArray(data.pending)
+              ? data.pending
+              : [];
+
+          setCentralPending(pending);
+          onUpdatePendingSignups(pending);
+        } catch (error) {
+          if (!cancelled) {
+            console.error(
+              'Initial pending signup refresh failed:',
+              error
+            );
+          }
+        }
+      };
+
+      void loadInitialPending();
+
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+
+    /* ==========================================================================
+       LOAD EMPLOYEE HISTORY
+    ========================================================================== */
+
+    const loadEmployeeHistory =
+      async (
+        employeeId: string
+      ) => {
+
+        if (!employeeId) {
+
+          setHistoryRows([]);
+
+          setSelectedDate('');
+
+          setSelectedActivity(
+            null
+          );
+
+          return;
+        }
+
+
+        const requestId =
+          ++activityRequestRef.current;
+
+
+        try {
+
+          const response =
+            await apiFetch(
+              `/api/activity-history/${encodeURIComponent(
+                employeeId
+              )}`,
+              {
+                method: 'GET',
+                cache: 'no-store',
+              }
+            );
+
+
+          const data =
+            await readApiJson(
+              response
+            );
+
+
+          if (
+            !response.ok ||
+            !data?.success
+          ) {
+
+            throw new Error(
+              data?.error ||
+              'Failed to load activity history'
+            );
+          }
+
+
+          if (
+            requestId !==
+            activityRequestRef.current
+          ) {
+            return;
+          }
+
+
+          const records:
+            ActivityHistoryRow[] =
+            Array.isArray(
+              data.records
+            )
+              ? data.records
+              : [];
+
+
+          setHistoryRows(records);
+
+          setHistoryReadyFor(employeeId);
+
+          // Show today first (like the Employee dashboard).
+          setSelectedDate(getTodayDateKey());
+
+
+          setSelectedActivity(
+            null
+          );
+
+        } catch (err: any) {
+
+          if (
+            requestId ===
+            activityRequestRef.current
+          ) {
+
+            flash(
+              `❌ ${err.message}`
+            );
+          }
+
+        }
+      };
+
+
+    /* ==========================================================================
+       LOAD SELECTED ACTIVITY
+    ========================================================================== */
+
+
+    // const loadSelectedActivity =
+    //   async (
+    //     employeeId: string,
+    //     dateKey: string
+    //   ) => {
+    //     if (!employeeId || !dateKey) {
+    //       setSelectedActivity(null);
+    //       return;
+    //     }
+
+    //     const requestId =
+    //       ++activityRequestRef.current;
+
+    //     setSelectedActivity(null);
+
+    //     try {
+    //       const response = await apiFetch(
+    //         `/api/activity/${encodeURIComponent(
+    //           employeeId
+    //         )}/${encodeURIComponent(dateKey)}`,
+    //         {
+    //           method: 'GET',
+    //           cache: 'no-store',
+    //         }
+    //       );
+
+    //       const data = await readApiJson(response);
+
+    //       if (!response.ok || !data?.success) {
+    //         throw new Error(
+    //           data?.error ||
+    //           'Failed to load selected date activity'
+    //         );
+    //       }
+
+    //       if (
+    //         requestId !== activityRequestRef.current
+    //       ) {
+    //         return;
+    //       }
+
+    //       // Fetch activity counts saved for each screenshot.
+    //       let activityData = data;
+
+    //       try {
+    //         const snapshotResponse = await apiFetch(
+    //           `/api/activity-snapshots/${encodeURIComponent(
+    //             employeeId
+    //           )}/${encodeURIComponent(dateKey)}`,
+    //           {
+    //             method: 'GET',
+    //             cache: 'no-store',
+    //           }
+    //         );
+
+    //         const snapshotData =
+    //           await readApiJson(snapshotResponse);
+
+    //         if (
+    //           snapshotResponse.ok &&
+    //           snapshotData?.success &&
+    //           Array.isArray(snapshotData.snapshots)
+    //         ) {
+    //           const snapshotsByKey = new Map<string, any>();
+
+    //           snapshotData.snapshots.forEach(
+    //             (snapshot: any) => {
+    //               const key = String(
+    //                 snapshot.screenshotKey || ''
+    //               ).trim();
+
+    //               if (key) {
+    //                 snapshotsByKey.set(key, snapshot);
+    //               }
+    //             }
+    //           );
+
+    //           activityData = {
+    //             ...data,
+    //             screenshots: (
+    //               data.screenshots || []
+    //             ).map((screen: ScreenshotItem) => {
+    //               const snapshot = snapshotsByKey.get(
+    //                 String(screen.fileName || '').trim()
+    //               );
+
+    //               return {
+    //                 ...screen,
+    //                 activityCounts: snapshot
+    //                   ? {
+    //                     mouseMoves: Number(
+    //                       snapshot.mouseMoves || 0
+    //                     ),
+    //                     mouseClicks: Number(
+    //                       snapshot.mouseClicks || 0
+    //                     ),
+    //                     keyPresses: Number(
+    //                       snapshot.keyPresses || 0
+    //                     ),
+    //                     activityPercent: Math.max(
+    //                       0,
+    //                       Math.min(100, Number(snapshot.activityPercent) || 0)
+    //                     ),
+    //                     activeSeconds: Number(snapshot.activeSeconds || 0),
+    //                     trackedSeconds: Number(snapshot.trackedSeconds || 0),
+    //                   }
+    //                   : undefined,
+    //               };
+    //             }),
+    //           };
+    //         }
+    //       } catch (snapshotError) {
+    //         console.error(
+    //           'Failed to load screenshot activity counts:',
+    //           snapshotError
+    //         );
+    //       }
+
+    //       if (
+    //         requestId !== activityRequestRef.current
+    //       ) {
+    //         return;
+    //       }
+
+    //       setSelectedActivity(activityData);
+    //     } catch (err: any) {
+    //       if (
+    //         requestId === activityRequestRef.current
+    //       ) {
+    //         flash(`❌ ${err.message}`);
+    //       }
+    //     }
+    //   };
+
+const loadSelectedActivity = async (
+  employeeId: string,
+  dateKey: string
+) => {
+  if (!employeeId || !dateKey) {
+    setSelectedActivity(null);
+    return;
+  }
+
+  const requestId = ++activityRequestRef.current;
+
+  setSelectedActivity(null);
+
+  try {
+    const response = await apiFetch(
+      `/api/activity/${encodeURIComponent(
+        employeeId
+      )}/${encodeURIComponent(dateKey)}`,
+      {
+        method: 'GET',
+        cache: 'no-store',
       }
-    };
+    );
 
+    const data = await readApiJson(response);
 
-  /* ==========================================================================
-     LOAD SELECTED ACTIVITY
-  ========================================================================== */
+    if (!response.ok || !data?.success) {
+      throw new Error(
+        data?.error || 'Failed to load selected date activity'
+      );
+    }
 
-  
-const loadSelectedActivity =
-  async (
-    employeeId: string,
-    dateKey: string
-  ) => {
-    if (!employeeId || !dateKey) {
-      setSelectedActivity(null);
+    if (requestId !== activityRequestRef.current) {
       return;
     }
 
-    const requestId =
-      ++activityRequestRef.current;
-
-    setSelectedActivity(null);
+    // Fetch activity counts saved for each screenshot.
+    let activityData = data;
 
     try {
-      const response = await apiFetch(
-        `/api/activity/${encodeURIComponent(
+      const snapshotResponse = await apiFetch(
+        `/api/activity-snapshots/${encodeURIComponent(
           employeeId
         )}/${encodeURIComponent(dateKey)}`,
         {
@@ -1111,654 +1299,651 @@ const loadSelectedActivity =
         }
       );
 
-      const data = await readApiJson(response);
-
-      if (!response.ok || !data?.success) {
-        throw new Error(
-          data?.error ||
-            'Failed to load selected date activity'
-        );
-      }
+      const snapshotData = await readApiJson(snapshotResponse);
 
       if (
-        requestId !== activityRequestRef.current
+        snapshotResponse.ok &&
+        snapshotData?.success &&
+        Array.isArray(snapshotData.snapshots)
       ) {
-        return;
-      }
+        const snapshotsByKey = new Map<string, any>();
 
-      // Fetch activity counts saved for each screenshot.
-      let activityData = data;
+        snapshotData.snapshots.forEach((snapshot: any) => {
+          const key = String(
+            snapshot.screenshotKey || ''
+          ).trim();
 
-      try {
-        const snapshotResponse = await apiFetch(
-          `/api/activity-snapshots/${encodeURIComponent(
-            employeeId
-          )}/${encodeURIComponent(dateKey)}`,
-          {
-            method: 'GET',
-            cache: 'no-store',
+          if (key) {
+            snapshotsByKey.set(key, snapshot);
           }
-        );
+        });
 
-        const snapshotData =
-          await readApiJson(snapshotResponse);
-
-        if (
-          snapshotResponse.ok &&
-          snapshotData?.success &&
-          Array.isArray(snapshotData.snapshots)
-        ) {
-          const snapshotsByKey = new Map<string, any>();
-
-          snapshotData.snapshots.forEach(
-            (snapshot: any) => {
-              const key = String(
-                snapshot.screenshotKey || ''
-              ).trim();
-
-              if (key) {
-                snapshotsByKey.set(key, snapshot);
-              }
-            }
-          );
-
-          activityData = {
-            ...data,
-            screenshots: (
-              data.screenshots || []
-            ).map((screen: ScreenshotItem) => {
+        activityData = {
+          ...data,
+          screenshots: (data.screenshots || []).map(
+            (screen: ScreenshotItem) => {
               const snapshot = snapshotsByKey.get(
                 String(screen.fileName || '').trim()
               );
 
+              if (!snapshot) {
+                return {
+                  ...screen,
+                  activityCounts: undefined,
+                };
+              }
+
+              const activeSeconds = Math.max(
+                0,
+                Number(snapshot.activeSeconds) || 0
+              );
+
+              const trackedSeconds = Math.max(
+                0,
+                Number(snapshot.trackedSeconds) || 0
+              );
+
+              // Calculate percentage from server-side activity data.
+              // Fall back to saved percentage when duration data is unavailable.
+              const activityPercent =
+                trackedSeconds > 0
+                  ? Math.min(
+                      100,
+                      Math.round(
+                        (activeSeconds / trackedSeconds) * 100
+                      )
+                    )
+                  : Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        Number(snapshot.activityPercent) || 0
+                      )
+                    );
+
               return {
                 ...screen,
-                activityCounts: snapshot
-                  ? {
-                      mouseMoves: Number(
-                        snapshot.mouseMoves || 0
-                      ),
-                      mouseClicks: Number(
-                        snapshot.mouseClicks || 0
-                      ),
-                      keyPresses: Number(
-                        snapshot.keyPresses || 0
-                      ),
-                      activityPercent: Math.max(
-  0,
-  Math.min(100, Number(snapshot.activityPercent) || 0)
-),
-activeSeconds: Number(snapshot.activeSeconds || 0),
-trackedSeconds: Number(snapshot.trackedSeconds || 0),
-                    }
-                  : undefined,
+                activityCounts: {
+                  mouseMoves: Math.max(
+                    0,
+                    Number(snapshot.mouseMoves) || 0
+                  ),
+                  mouseClicks: Math.max(
+                    0,
+                    Number(snapshot.mouseClicks) || 0
+                  ),
+                  keyPresses: Math.max(
+                    0,
+                    Number(snapshot.keyPresses) || 0
+                  ),
+                  activityPercent,
+                  activeSeconds,
+                  trackedSeconds,
+                },
               };
-            }),
-          };
-        }
-      } catch (snapshotError) {
-        console.error(
-          'Failed to load screenshot activity counts:',
-          snapshotError
-        );
+            }
+          ),
+        };
       }
-
-      if (
-        requestId !== activityRequestRef.current
-      ) {
-        return;
-      }
-
-      setSelectedActivity(activityData);
-    } catch (err: any) {
-      if (
-        requestId === activityRequestRef.current
-      ) {
-        flash(`❌ ${err.message}`);
-      }
-    }
-  };
-
-
-
-  useEffect(() => {
-
-    activityRequestRef.current +=
-      1;
-
-    setHistoryRows([]);
-
-    setSelectedDate('');
-
-    setSelectedActivity(
-      null
-    );
-
-    setPreviewImage(
-      null
-    );
-
-
-    if (
-      selectedEmployeeId
-    ) {
-
-      void loadEmployeeHistory(
-        selectedEmployeeId
+    } catch (snapshotError) {
+      console.error(
+        'Failed to load screenshot activity counts:',
+        snapshotError
       );
     }
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedEmployeeId,
-  ]);
+    if (requestId !== activityRequestRef.current) {
+      return;
+    }
+
+    setSelectedActivity(activityData);
+  } catch (err: any) {
+    if (requestId === activityRequestRef.current) {
+      flash(`❌ ${err.message}`);
+    }
+  }
+};
 
 
-  useEffect(() => {
 
-    if (
-      selectedEmployeeId &&
-      selectedDate
-    ) {
+    useEffect(() => {
 
-      void loadSelectedActivity(
-        selectedEmployeeId,
-        selectedDate
-      );
+      activityRequestRef.current +=
+        1;
 
-    } else {
+      setHistoryRows([]);
+
+      setSelectedDate('');
 
       setSelectedActivity(
         null
       );
-    }
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedEmployeeId,
-    selectedDate,
-  ]);
+      setPreviewImage(
+        null
+      );
 
-
-  /* ==========================================================================
-     APPROVE SIGNUP
-  ========================================================================== */
-
-  const approveSignup =
-    async (
-      signup: any
-    ) => {
-
-      try {
-
-        setLoading(true);
-
-
-        const response =
-          await apiFetch(
-            `/api/approve-employee/${encodeURIComponent(
-              signup.id
-            )}`,
-            {
-              method: 'POST',
-            }
-          );
-
-
-        const data =
-          await readApiJson(
-            response
-          );
-
-
-        if (
-          !response.ok ||
-          !data?.success
-        ) {
-
-          throw new Error(
-            data?.error ||
-            'Approval failed'
-          );
-        }
-
-
-        flash(
-          `✅ ${signup.name} approved and activated.`
-        );
-
-
-        await refreshCentralData(
-          true
-        );
-
-      } catch (err: any) {
-
-        flash(
-          `❌ ${err.message}`
-        );
-
-      } finally {
-
-        setLoading(false);
-
-      }
-    };
-
-
-  /* ==========================================================================
-     REJECT SIGNUP
-  ========================================================================== */
-
-  const rejectSignup =
-    async (
-      signup: any
-    ) => {
-
-      try {
-
-        setLoading(true);
-
-
-        const response =
-          await apiFetch(
-            `/api/reject-employee/${encodeURIComponent(
-              signup.id
-            )}`,
-            {
-              method: 'DELETE',
-            }
-          );
-
-
-        const data =
-          await readApiJson(
-            response
-          );
-
-
-        if (
-          !response.ok ||
-          !data?.success
-        ) {
-
-          throw new Error(
-            data?.error ||
-            'Reject failed'
-          );
-        }
-
-
-        flash(
-          `✅ ${signup.name} request rejected.`
-        );
-
-
-        await refreshCentralData(
-          true
-        );
-
-      } catch (err: any) {
-
-        flash(
-          `❌ ${err.message}`
-        );
-
-      } finally {
-
-        setLoading(false);
-
-      }
-    };
-
-
-  /* ==========================================================================
-     DELETE EMPLOYEE
-  ========================================================================== */
-
-  const deleteEmployee =
-    async (
-      employee: AppUser
-    ) => {
 
       if (
-        !window.confirm(
-          `Delete ${employee.name} account? Existing screenshot folders/data will be kept.`
-        )
+        selectedEmployeeId
       ) {
-        return;
+
+        void loadEmployeeHistory(
+          selectedEmployeeId
+        );
       }
 
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      selectedEmployeeId,
+    ]);
 
-      try {
 
-        setLoading(true);
+    useEffect(() => {
+
+      if (
+        selectedEmployeeId &&
+        selectedDate
+      ) {
+
+        void loadSelectedActivity(
+          selectedEmployeeId,
+          selectedDate
+        );
+
+      } else {
+
+        setSelectedActivity(
+          null
+        );
+      }
+
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      selectedEmployeeId,
+      selectedDate,
+    ]);
 
 
-        const response =
-          await apiFetch(
-            `/api/employees/${encodeURIComponent(
-              employee.id
-            )}`,
-            {
-              method: 'DELETE',
-            }
+    /* ==========================================================================
+       APPROVE SIGNUP
+    ========================================================================== */
+
+    const approveSignup =
+      async (
+        signup: any
+      ) => {
+
+        try {
+
+          setLoading(true);
+
+
+          const response =
+            await apiFetch(
+              `/api/approve-employee/${encodeURIComponent(
+                signup.id
+              )}`,
+              {
+                method: 'POST',
+              }
+            );
+
+
+          const data =
+            await readApiJson(
+              response
+            );
+
+
+          if (
+            !response.ok ||
+            !data?.success
+          ) {
+
+            throw new Error(
+              data?.error ||
+              'Approval failed'
+            );
+          }
+
+
+          flash(
+            `✅ ${signup.name} approved and activated.`
           );
 
 
-        const data =
-          await readApiJson(
-            response
+          await refreshCentralData(
+            true
           );
 
+        } catch (err: any) {
+
+          flash(
+            `❌ ${err.message}`
+          );
+
+        } finally {
+
+          setLoading(false);
+
+        }
+      };
+
+
+    /* ==========================================================================
+       REJECT SIGNUP
+    ========================================================================== */
+
+    const rejectSignup =
+      async (
+        signup: any
+      ) => {
+
+        try {
+
+          setLoading(true);
+
+
+          const response =
+            await apiFetch(
+              `/api/reject-employee/${encodeURIComponent(
+                signup.id
+              )}`,
+              {
+                method: 'DELETE',
+              }
+            );
+
+
+          const data =
+            await readApiJson(
+              response
+            );
+
+
+          if (
+            !response.ok ||
+            !data?.success
+          ) {
+
+            throw new Error(
+              data?.error ||
+              'Reject failed'
+            );
+          }
+
+
+          flash(
+            `✅ ${signup.name} request rejected.`
+          );
+
+
+          await refreshCentralData(
+            true
+          );
+
+        } catch (err: any) {
+
+          flash(
+            `❌ ${err.message}`
+          );
+
+        } finally {
+
+          setLoading(false);
+
+        }
+      };
+
+
+    /* ==========================================================================
+       DELETE EMPLOYEE
+    ========================================================================== */
+
+    const deleteEmployee =
+      async (
+        employee: AppUser
+      ) => {
 
         if (
-          !response.ok ||
-          !data?.success
+          !window.confirm(
+            `Delete ${employee.name} account? Existing screenshot folders/data will be kept.`
+          )
         ) {
-
-          throw new Error(
-            data?.error ||
-            'Delete failed'
-          );
+          return;
         }
 
 
-        flash(
-          `✅ ${employee.name} deleted.`
-        );
+        try {
+
+          setLoading(true);
 
 
-        if (
-          selectedEmployeeId ===
-          employee.id
-        ) {
+          const response =
+            await apiFetch(
+              `/api/employees/${encodeURIComponent(
+                employee.id
+              )}`,
+              {
+                method: 'DELETE',
+              }
+            );
 
-          setSelectedEmployeeId('');
 
-          setHistoryRows([]);
+          const data =
+            await readApiJson(
+              response
+            );
 
-          setSelectedActivity(
-            null
+
+          if (
+            !response.ok ||
+            !data?.success
+          ) {
+
+            throw new Error(
+              data?.error ||
+              'Delete failed'
+            );
+          }
+
+
+          flash(
+            `✅ ${employee.name} deleted.`
           );
 
-          setPreviewImage(
-            null
+
+          if (
+            selectedEmployeeId ===
+            employee.id
+          ) {
+
+            setSelectedEmployeeId('');
+
+            setHistoryRows([]);
+
+            setSelectedActivity(
+              null
+            );
+
+            setPreviewImage(
+              null
+            );
+          }
+
+
+          await refreshCentralData(
+            true
           );
+
+        } catch (err: any) {
+
+          flash(
+            `❌ ${err.message}`
+          );
+
+        } finally {
+
+          setLoading(false);
+
         }
+      };
 
 
-        await refreshCentralData(
-          true
-        );
+    /* ==========================================================================
+       SAVE GLOBAL CAPTURE SETTINGS
+    ========================================================================== */
 
-      } catch (err: any) {
+    const saveGlobalCaptureSettings =
+      async () => {
 
-        flash(
-          `❌ ${err.message}`
-        );
+        try {
 
-      } finally {
-
-        setLoading(false);
-
-      }
-    };
+          setLoading(true);
 
 
-  /* ==========================================================================
-     SAVE GLOBAL CAPTURE SETTINGS
-  ========================================================================== */
+          const response =
+            await apiFetch(
+              '/api/capture-settings',
+              {
+                method: 'POST',
 
-  const saveGlobalCaptureSettings =
-    async () => {
+                headers: {
+                  'Content-Type':
+                    'application/json',
+                },
 
-      try {
+                body:
+                  JSON.stringify({
 
-        setLoading(true);
+                    captureMode:
+                      'random_count_window',
 
-
-        const response =
-          await apiFetch(
-            '/api/capture-settings',
-            {
-              method: 'POST',
-
-              headers: {
-                'Content-Type':
-                  'application/json',
-              },
-
-              body:
-                JSON.stringify({
-
-                  captureMode:
-                    'random_count_window',
-
-                  captureWindowSeconds,
-
-                  screenshotsPerWindow,
-
-                  presetId,
-
-                  captureIntervalSeconds:
                     captureWindowSeconds,
 
-                  allowedIntervals,
+                    screenshotsPerWindow,
 
-                  lockIntervalForEmployees,
-                }),
-            }
+                    presetId,
+
+                    captureIntervalSeconds:
+                      captureWindowSeconds,
+
+                    allowedIntervals,
+
+                    lockIntervalForEmployees,
+                  }),
+              }
+            );
+
+
+          const data =
+            await readApiJson(
+              response
+            );
+
+
+          if (
+            !response.ok ||
+            !data?.success
+          ) {
+
+            throw new Error(
+              data?.error ||
+              'Failed to save global capture settings'
+            );
+          }
+
+
+          captureEditingRef.current =
+            false;
+
+
+          const updatedSettings:
+            StorageSettings = {
+
+            ...storageSettings,
+
+            captureMode:
+              data.settings
+                .captureMode as any,
+
+            captureIntervalSeconds:
+              data.settings
+                .captureIntervalSeconds,
+
+            autoCaptureIntervalMinutes:
+              data.settings
+                .autoCaptureIntervalMinutes,
+
+            allowedIntervals:
+              data.settings
+                .allowedIntervals,
+
+            lockIntervalForEmployees:
+              data.settings
+                .lockIntervalForEmployees,
+          };
+
+
+          onUpdateStorageSettings(
+            updatedSettings
           );
 
 
-        const data =
-          await readApiJson(
-            response
+          flash(
+            '✅ Global screenshot interval saved. All open employee PCs will receive this setting automatically.'
           );
 
+        } catch (err: any) {
 
-        if (
-          !response.ok ||
-          !data?.success
-        ) {
-
-          throw new Error(
-            data?.error ||
-            'Failed to save global capture settings'
+          flash(
+            `❌ ${err.message}`
           );
+
+        } finally {
+
+          setLoading(false);
+
         }
+      };
 
 
-        captureEditingRef.current =
-          false;
+    /* ==========================================================================
+       PRESETS
+    ========================================================================== */
 
+    const applyPreset = (
+      id: string,
+      windowSeconds: number,
+      screenshots: number
+    ) => {
 
-        const updatedSettings:
-          StorageSettings = {
+      captureEditingRef.current =
+        true;
 
-          ...storageSettings,
+      setPresetId(id);
 
-          captureMode:
-            data.settings
-              .captureMode as any,
+      setCaptureMode(
+        'random_count_window'
+      );
 
-          captureIntervalSeconds:
-            data.settings
-              .captureIntervalSeconds,
+      setCaptureWindowSeconds(
+        windowSeconds
+      );
 
-          autoCaptureIntervalMinutes:
-            data.settings
-              .autoCaptureIntervalMinutes,
+      setCaptureIntervalSeconds(
+        windowSeconds
+      );
 
-          allowedIntervals:
-            data.settings
-              .allowedIntervals,
-
-          lockIntervalForEmployees:
-            data.settings
-              .lockIntervalForEmployees,
-        };
-
-
-        onUpdateStorageSettings(
-          updatedSettings
-        );
-
-
-        flash(
-          '✅ Global screenshot interval saved. All open employee PCs will receive this setting automatically.'
-        );
-
-      } catch (err: any) {
-
-        flash(
-          `❌ ${err.message}`
-        );
-
-      } finally {
-
-        setLoading(false);
-
-      }
-    };
-
-
-  /* ==========================================================================
-     PRESETS
-  ========================================================================== */
-
-  const applyPreset = (
-    id: string,
-    windowSeconds: number,
-    screenshots: number
-  ) => {
-
-    captureEditingRef.current =
-      true;
-
-    setPresetId(id);
-
-    setCaptureMode(
-      'random_count_window'
-    );
-
-    setCaptureWindowSeconds(
-      windowSeconds
-    );
-
-    setCaptureIntervalSeconds(
-      windowSeconds
-    );
-
-    setScreenshotsPerWindow(
-      screenshots
-    );
-  };
-
-
-  const applyCustomPolicy =
-    () => {
-
-      const seconds =
-        Math.max(
-          60,
-          Math.floor(
-            Number(
-              customMinutes
-            ) || 1
-          ) * 60
-        );
-
-
-      const count =
-        Math.max(
-          1,
-          Math.floor(
-            Number(
-              customScreenshots
-            ) || 1
-          )
-        );
-
-
-      applyPreset(
-        'custom',
-        seconds,
-        count
+      setScreenshotsPerWindow(
+        screenshots
       );
     };
 
 
-  const selectedEmployee =
-    centralUsers.find(
-      (u) =>
-        u.id ===
-        selectedEmployeeId
-    );
+    const applyCustomPolicy =
+      () => {
+
+        const seconds =
+          Math.max(
+            60,
+            Math.floor(
+              Number(
+                customMinutes
+              ) || 1
+            ) * 60
+          );
 
 
-  const selectedSummary =
-    summaryRows.find(
-      (r) =>
-        r.employeeId ===
-        selectedEmployeeId
-    );
+        const count =
+          Math.max(
+            1,
+            Math.floor(
+              Number(
+                customScreenshots
+              ) || 1
+            )
+          );
 
 
-  /* ==========================================================================
-     ACTIVITY HISTORY FILTERS
-  ========================================================================== */
+        applyPreset(
+          'custom',
+          seconds,
+          count
+        );
+      };
 
-  const availableHistoryYears:
-    string[] =
-    Array.from(
-      new Set(
-        historyRows
-          .map(
-            (row) =>
-              row.dateKey
-                ?.slice(
-                  0,
-                  4
-                )
-          )
-          .filter(
-            (
-              year
-            ): year is string =>
-              Boolean(
+
+    const selectedEmployee =
+      centralUsers.find(
+        (u) =>
+          u.id ===
+          selectedEmployeeId
+      );
+
+
+    const selectedSummary =
+      summaryRows.find(
+        (r) =>
+          r.employeeId ===
+          selectedEmployeeId
+      );
+
+
+    /* ==========================================================================
+       ACTIVITY HISTORY FILTERS
+    ========================================================================== */
+
+    const availableHistoryYears:
+      string[] =
+      Array.from(
+        new Set(
+          historyRows
+            .map(
+              (row) =>
+                row.dateKey
+                  ?.slice(
+                    0,
+                    4
+                  )
+            )
+            .filter(
+              (
                 year
-              )
-          )
+              ): year is string =>
+                Boolean(
+                  year
+                )
+            )
+        )
       )
-    )
-      .sort(
-        (
-          a,
-          b
-        ) =>
-          b.localeCompare(
-            a
-          )
-      );
+        .sort(
+          (
+            a,
+            b
+          ) =>
+            b.localeCompare(
+              a
+            )
+        );
 
 
-  const effectiveHistoryYear =
-    selectedHistoryYear &&
-    availableHistoryYears.includes(
-      selectedHistoryYear
-    )
-      ? selectedHistoryYear
-      : availableHistoryYears[0] ||
+    const effectiveHistoryYear =
+      selectedHistoryYear &&
+        availableHistoryYears.includes(
+          selectedHistoryYear
+        )
+        ? selectedHistoryYear
+        : availableHistoryYears[0] ||
         '';
 
 
-  const availableHistoryMonths:
-    string[] =
-    effectiveHistoryYear
+    const availableHistoryMonths:
+      string[] =
+      effectiveHistoryYear
 
-      ? Array.from(
+        ? Array.from(
           new Set(
             historyRows
 
@@ -1793,26 +1978,26 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               )
           )
 
-      : [];
+        : [];
 
 
-  const effectiveHistoryMonth =
-    selectedHistoryMonth &&
-    availableHistoryMonths.includes(
-      selectedHistoryMonth
-    )
+    const effectiveHistoryMonth =
+      selectedHistoryMonth &&
+        availableHistoryMonths.includes(
+          selectedHistoryMonth
+        )
 
-      ? selectedHistoryMonth
+        ? selectedHistoryMonth
 
-      : availableHistoryMonths[0] ||
+        : availableHistoryMonths[0] ||
         '';
 
 
-  const filteredActivityDates:
-    ActivityHistoryRow[] =
-    effectiveHistoryMonth
+    const filteredActivityDates:
+      ActivityHistoryRow[] =
+      effectiveHistoryMonth
 
-      ? historyRows
+        ? historyRows
 
           .filter(
             (
@@ -1834,74 +2019,142 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               )
           )
 
-      : [];
+        : [];
 
 
-  const getHistoryMonthLabel =
-    (
-      monthValue: string
-    ) => {
+    const getHistoryMonthLabel =
+      (
+        monthValue: string
+      ) => {
 
-      const [
-        year,
-        month,
-      ] =
-        monthValue.split(
-          '-'
-        );
-
-
-      const monthNumber =
-        Number(
-          month
-        );
+        const [
+          year,
+          month,
+        ] =
+          monthValue.split(
+            '-'
+          );
 
 
-      if (
-        !year ||
-        !monthNumber
-      ) {
-
-        return monthValue;
-      }
+        const monthNumber =
+          Number(
+            month
+          );
 
 
-      return new Date(
-        Number(
-          year
-        ),
-        monthNumber - 1,
-        1
-      )
-        .toLocaleDateString(
-          undefined,
-          {
-            month:
-              'long',
+        if (
+          !year ||
+          !monthNumber
+        ) {
 
-            year:
-              'numeric',
-          }
-        );
+          return monthValue;
+        }
+
+
+        return new Date(
+          Number(
+            year
+          ),
+          monthNumber - 1,
+          1
+        )
+          .toLocaleDateString(
+            undefined,
+            {
+              month:
+                'long',
+
+              year:
+                'numeric',
+            }
+          );
+      };
+
+
+    
+    // ---- Screenshot pagination (selected employee + selected date only) ----
+    const adminScreenshots = useMemo<ScreenshotItem[]>(
+      () =>
+        Array.isArray(selectedActivity?.screenshots)
+          ? selectedActivity.screenshots
+          : [],
+      [selectedActivity]
+    );
+
+    const adminPagination = usePagination(
+      adminScreenshots,
+      `${selectedEmployeeId}|${selectedDate}`
+    );
+
+    
+    // ---- My Time Tracking (selected employee only; view only) ----
+    latestEmployeeIdRef.current = selectedEmployeeId;
+    latestDateRef.current = selectedDate;
+
+    const adminToday = getTodayDateKey();
+
+    // Same steps as clicking a date in the left list.
+    const handleAdminDateChange = (dateKey: string) => {
+      if (!selectedEmployeeId || dateKey === selectedDate) return;
+
+      activityRequestRef.current += 1;
+      setSelectedActivity(null);
+      setPreviewImage(null);
+      setSelectedDate(dateKey);
     };
 
+    // Reloads this employee's history rows and the selected date,
+    // without changing the selected employee or date.
+    const refreshSelectedEmployeeData = async () => {
+      const employeeId = selectedEmployeeId;
+      const dateAtClick = selectedDate;
 
-  /* ==========================================================================
-     UI
-  ========================================================================== */
+      if (!employeeId) return;
 
-  return (
+      try {
+        const response = await apiFetch(
+          `/api/activity-history/${encodeURIComponent(employeeId)}`,
+          { method: 'GET', cache: 'no-store' }
+        );
 
-    <div className="
+        const data = await readApiJson(response);
+
+        if (
+          response.ok &&
+          data?.success &&
+          latestEmployeeIdRef.current === employeeId
+        ) {
+          setHistoryRows(Array.isArray(data.records) ? data.records : []);
+        }
+      } catch (err: any) {
+        flash(`❌ ${err.message}`);
+      }
+
+      if (
+        dateAtClick &&
+        latestEmployeeIdRef.current === employeeId &&
+        latestDateRef.current === dateAtClick
+      ) {
+        void loadSelectedActivity(employeeId, dateAtClick);
+      }
+    };
+
+    /* ==========================================================================
+       UI
+    ========================================================================== */
+
+    return (
+
+      <div className="
       w-full
       max-w-7xl
       mx-auto
       space-y-6
     ">
 
-      {/* HEADER */}
+        {/* HEADER */}
 
-      <div className="
+        <div className="
         bg-slate-900
         text-white
         rounded-2xl
@@ -1918,9 +2171,9 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
         gap-4
       ">
 
-        <div>
+          <div>
 
-          <div className="
+            <div className="
             flex
             items-center
             gap-2
@@ -1932,54 +2185,54 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
             mb-1
           ">
 
-            <ShieldCheck className="
+              <ShieldCheck className="
               w-4
               h-4
             " />
 
-            Central Admin Console
+              Central Admin Console
 
-          </div>
+            </div>
 
 
-          <h1 className="
+            <h1 className="
             text-2xl
             font-bold
           ">
-            Team Activity &
-            Central Tracking
-          </h1>
+              Team Activity &
+              Central Tracking
+            </h1>
 
 
-          <p className="
+            <p className="
             text-sm
             text-slate-400
             mt-1
           ">
 
-            Logged in as{' '}
+              Logged in as{' '}
 
-            <span className="
+              <span className="
               text-white
               font-semibold
             ">
-              {adminUser.name}
-            </span>
+                {adminUser.name}
+              </span>
 
-          </p>
+            </p>
 
-        </div>
+          </div>
 
 
-        <button
-          onClick={() => {
-            captureEditingRef.current =
-              false;
+          <button
+            onClick={() => {
+              captureEditingRef.current =
+                false;
 
-            void refreshCentralData();
-          }}
-          disabled={loading}
-          className="
+              void refreshCentralData();
+            }}
+            disabled={loading}
+            className="
             inline-flex
             items-center
             gap-2
@@ -1993,28 +2246,27 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
             border
             border-slate-700
           "
-        >
+          >
 
-          <RefreshCw
-            className={`w-4 h-4 ${
-              loading
-                ? 'animate-spin'
-                : ''
-            }`}
-          />
+            <RefreshCw
+              className={`w-4 h-4 ${loading
+                  ? 'animate-spin'
+                  : ''
+                }`}
+            />
 
-          Refresh
+            Refresh
 
-        </button>
+          </button>
 
-      </div>
+        </div>
 
 
-      {/* MESSAGE */}
+        {/* MESSAGE */}
 
-      {message && (
+        {message && (
 
-        <div className="
+          <div className="
           p-3.5
           rounded-xl
           border
@@ -2027,15 +2279,15 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
           text-xs
           font-medium
         ">
-          {message}
-        </div>
+            {message}
+          </div>
 
-      )}
+        )}
 
 
-      {/* TABS */}
+        {/* TABS */}
 
-      <div className="
+        <div className="
         flex
         gap-2
         border-b
@@ -2044,38 +2296,45 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
         overflow-x-auto
       ">
 
-        {[
-          [
-            'employees',
-            `Employees (${centralUsers.length})`,
-          ],
+          {[
+            [
+              'employees',
+              `Employees (${centralUsers.length})`,
+            ],
 
-          [
-            'approvals',
-            `Pending Approvals (${centralPending.length})`,
-          ],
+            [
+              'reports',
+              'Time & Activity Report',
+            ],
 
-          [
-            'activity',
-            'Date-wise Activity',
-          ],
+            [
+              'approvals',
+              `Pending Approvals (${centralPending.length})`,
+            ],
 
-          [
-            'storage',
-            'Global Capture Settings',
-          ],
+            [
+              'activity',
+              'Date-wise Activity',
+            ],
 
-        ].map(
-          ([key, label]) => (
+            [
+              'storage',
+              'Global Capture Settings',
+            ],
 
-            <button
-              key={key}
-              onClick={() =>
-                setActiveTab(
-                  key as AdminTab
-                )
-              }
-              className={`
+            ['forgotten', 'Forgotten Time Requests'],
+
+          ].map(
+            ([key, label]) => (
+
+              <button
+                key={key}
+                onClick={() =>
+                  setActiveTab(
+                    key as AdminTab
+                  )
+                }
+                className={`
                 px-4
                 py-2.5
                 text-sm
@@ -2083,32 +2342,76 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                 border-b-2
                 whitespace-nowrap
 
-                ${
-                  activeTab === key
+                ${activeTab === key
 
                     ? 'border-indigo-600 text-indigo-600'
 
                     : 'border-transparent text-slate-500'
-                }
+                  }
               `}
-            >
-              {label}
-            </button>
+              >
+                {label}
+              </button>
 
-          )
-        )}
+            )
+          )}
 
-      </div>
+        </div>
 
 
-      {/* ================================================================
+        {/* ================================================================
           EMPLOYEES
       ================================================================= */}
 
-      {activeTab ===
-        'employees' && (
+        {activeTab ===
+          'employees' && (
 
-        <div className="
+            <div className="space-y-3">
+
+              <ReportExportButtons
+                fileName="admin-work-report"
+                loadRows={async () => {
+                  const all: ReportRow[] = [];
+
+                  for (const emp of centralUsers) {
+                    const res = await apiFetch(
+                      `/api/activity-history/${encodeURIComponent(emp.id)}`,
+                      {
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                      }
+                    );
+
+                    const data = await readApiJson(res);
+
+                    if (!res.ok || !data?.success) {
+                      continue;
+                    }
+
+                    (Array.isArray(data.records) ? data.records : []).forEach(
+                      (r: ActivityHistoryRow) => {
+                        all.push({
+                          employeeName: emp.name,
+                          email: emp.email,
+                          date: r.dateKey,
+                          totalSeconds: r.totalSeconds,
+                          screenshots: r.screenshotCount,
+                          activeSeconds: r.activeSeconds ?? 0,
+                          trackedSeconds: r.trackedSeconds ?? 0,
+                          mouseMoves: r.mouseMoves ?? 0,
+                          mouseClicks: r.mouseClicks ?? 0,
+                          keyPresses: r.keyPresses ?? 0,
+                        });
+                      }
+                    );
+                  }
+
+                  return all;
+                }}
+              />
+
+              <div className="
           bg-white
           dark:bg-slate-900
           border
@@ -2118,217 +2421,217 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
           overflow-hidden
         ">
 
-          <table className="
+                <table className="
             w-full
             text-sm
           ">
 
-            <thead className="
+                  <thead className="
               bg-slate-50
               dark:bg-slate-800
               text-slate-600
               dark:text-slate-300
             ">
 
-              <tr>
+                    <tr>
 
-                <th className="
+                      <th className="
                   text-left
                   p-4
                 ">
-                  Employee
-                </th>
+                        Employee
+                      </th>
 
-                <th className="
+                      <th className="
                   text-left
                   p-4
                 ">
-                  Today
-                </th>
+                        Today
+                      </th>
 
-                <th className="
+                      <th className="
                   text-left
                   p-4
                 ">
-                  Tracker Events (Today, IST)
-                </th>
+                        Tracker Events (Today, IST)
+                      </th>
 
-                <th className="
+                      <th className="
                   text-left
                   p-4
                 ">
-                  Today Screenshots
-                </th>
+                        Today Screenshots
+                      </th>
 
-                <th className="
+                      <th className="
                   text-left
                   p-4
                 ">
-                  Month Total
-                </th>
+                        Month Total
+                      </th>
 
-                <th className="
+                      <th className="
                   text-right
                   p-4
                 ">
-                  Actions
-                </th>
+                        Actions
+                      </th>
 
-              </tr>
+                    </tr>
 
-            </thead>
+                  </thead>
 
 
-            <tbody className="
+                  <tbody className="
               divide-y
               divide-slate-100
               dark:divide-slate-800
             ">
 
-              {centralUsers.map(
-                (emp) => {
+                    {centralUsers.map(
+                      (emp) => {
 
-                  const summary =
-                    summaryRows.find(
-                      (r) =>
-                        r.employeeId ===
-                        emp.id
-                    );
+                        const summary =
+                          summaryRows.find(
+                            (r) =>
+                              r.employeeId ===
+                              emp.id
+                          );
 
 
-                  return (
+                        return (
 
-                    <tr key={emp.id}>
+                          <tr key={emp.id}>
 
-                      <td className="p-4">
+                            <td className="p-4">
 
-                        <div className="
+                              <div className="
                           font-bold
                           text-slate-900
                           dark:text-white
                         ">
-                          {emp.name}
-                        </div>
+                                {emp.name}
+                              </div>
 
-                        <div className="
+                              <div className="
                           text-xs
                           text-slate-400
                         ">
-                          {emp.email}
-                        </div>
-                        <div className="
+                                {emp.email}
+                              </div>
+                              <div className="
                             text-xs
                             text-slate-500
                             mt-1
                           ">
-                            <span className="font-semibold">
-                              Password:
-                            </span>{' '}
+                                <span className="font-semibold">
+                                  Password:
+                                </span>{' '}
 
-                            {emp.password || '-'}
-                          </div>
-                      </td>
+                                {emp.password || '-'}
+                              </div>
+                            </td>
 
 
-                      <td className="
+                            <td className="
                         p-4
                         font-mono
                       ">
-                        {formatSeconds(
-                          summary
-                            ?.todaySeconds ||
-                          0
-                        )}
-                      </td>
+                              {formatSeconds(
+                                summary
+                                  ?.todaySeconds ||
+                                0
+                              )}
+                            </td>
 
-                      <td className="p-4 min-w-[220px]">
-                        <div className="space-y-1 text-xs">
-                          {(summary?.trackerEvents || []).length === 0 ? (
-                            <span className="text-slate-400">No events yet</span>
-                          ) : (summary?.trackerEvents || []).map((event) => (
-                            <div key={event.id} className="flex gap-2">
-                              <span className="font-semibold capitalize">{event.eventType}</span>
-                              <span className="text-slate-500">
-                                {new Date(event.eventAt).toLocaleTimeString('en-IN', {
-                                  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-                                })}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
+                            <td className="p-4 min-w-[220px]">
+                              <div className="space-y-1 text-xs">
+                                {(summary?.trackerEvents || []).length === 0 ? (
+                                  <span className="text-slate-400">No events yet</span>
+                                ) : (summary?.trackerEvents || []).map((event) => (
+                                  <div key={event.id} className="flex gap-2">
+                                    <span className="font-semibold capitalize">{event.eventType}</span>
+                                    <span className="text-slate-500">
+                                      {new Date(event.eventAt).toLocaleTimeString('en-IN', {
+                                        timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+                                      })}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
 
-                      <td className="
+                            <td className="
                         p-4
                         font-semibold
                         text-indigo-600
                       ">
-                        {summary
-                          ?.todayScreenshots ||
-                          0}
-                      </td>
+                              {summary
+                                ?.todayScreenshots ||
+                                0}
+                            </td>
 
 
-                      <td className="
+                            <td className="
                         p-4
                         font-mono
                         font-bold
                       ">
-                        {formatSeconds(
-                          summary
-                            ?.monthlySeconds ||
-                          0
-                        )}
-                      </td>
+                              {formatSeconds(
+                                summary
+                                  ?.monthlySeconds ||
+                                0
+                              )}
+                            </td>
 
 
-                      <td className="p-4">
+                            <td className="p-4">
 
-                        <div className="
+                              <div className="
                           flex
                           justify-end
                           gap-2
                         ">
 
-                          <button
-                            onClick={() => {
+                                <button
+                                  onClick={() => {
 
-                              activityRequestRef.current +=
-                                1;
+                                    activityRequestRef.current +=
+                                      1;
 
-                              setHistoryRows(
-                                []
-                              );
+                                    setHistoryRows(
+                                      []
+                                    );
 
-                              setSelectedDate(
-                                ''
-                              );
+                                    setSelectedDate(
+                                      ''
+                                    );
 
-                              setSelectedActivity(
-                                null
-                              );
+                                    setSelectedActivity(
+                                      null
+                                    );
 
-                              setPreviewImage(
-                                null
-                              );
+                                    setPreviewImage(
+                                      null
+                                    );
 
-                              setSelectedHistoryYear(
-                                ''
-                              );
+                                    setSelectedHistoryYear(
+                                      ''
+                                    );
 
-                              setSelectedHistoryMonth(
-                                ''
-                              );
+                                    setSelectedHistoryMonth(
+                                      ''
+                                    );
 
-                              setSelectedEmployeeId(
-                                emp.id
-                              );
+                                    setSelectedEmployeeId(
+                                      emp.id
+                                    );
 
-                              setActiveTab(
-                                'activity'
-                              );
-                            }}
-                            className="
+                                    setActiveTab(
+                                      'activity'
+                                    );
+                                  }}
+                                  className="
                               px-3
                               py-1.5
                               rounded-lg
@@ -2338,18 +2641,18 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                               text-xs
                               font-semibold
                             "
-                          >
-                            View Activity
-                          </button>
+                                >
+                                  View Activity
+                                </button>
 
 
-                          <button
-                            onClick={() =>
-                              void deleteEmployee(
-                                emp
-                              )
-                            }
-                            className="
+                                <button
+                                  onClick={() =>
+                                    void deleteEmployee(
+                                      emp
+                                    )
+                                  }
+                                  className="
                               px-3
                               py-1.5
                               rounded-lg
@@ -2362,74 +2665,107 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                               items-center
                               gap-1
                             "
-                          >
+                                >
 
-                            <Trash2 className="
+                                  <Trash2 className="
                               w-3
                               h-3
                             " />
 
-                            Delete
+                                  Delete
 
-                          </button>
+                                </button>
 
-                        </div>
+                              </div>
 
-                      </td>
+                            </td>
 
-                    </tr>
+                          </tr>
 
-                  );
-                }
-              )}
+                        );
+                      }
+                    )}
 
 
-              {centralUsers.length ===
-                0 && (
+                    {centralUsers.length ===
+                      0 && (
 
-                <tr>
+                        <tr>
 
-                  <td
-                    colSpan={5}
-                    className="
+                          <td
+                            colSpan={5}
+                            className="
                       p-10
                       text-center
                       text-sm
                       text-slate-500
                     "
-                  >
-                    No central employees
-                    found yet.
-                  </td>
+                          >
+                            No central employees
+                            found yet.
+                          </td>
 
-                </tr>
+                        </tr>
 
-              )}
+                      )}
 
-            </tbody>
+                  </tbody>
 
-          </table>
+                </table>
 
-        </div>
+              </div>
 
-      )}
+            </div>
+
+          )}
 
 
-      {/* ================================================================
+        {/* ================================================================
+          TIME & ACTIVITY REPORT
+      ================================================================= */}
+
+        {activeTab === 'reports' && (
+          <TimeActivityReport
+            fileName="work-report"
+            allowMemberSelect
+            members={centralUsers.map((u) => ({
+              id: u.id,
+              name: u.name,
+              email: u.email,
+            }))}
+            loadHistory={async (member) => {
+              const res = await apiFetch(
+                `/api/activity-history/${encodeURIComponent(member.id)}`,
+                { method: 'GET', cache: 'no-store' }
+              );
+              const data = await readApiJson(res);
+              if (!res.ok || !data?.success) {
+                throw new Error(data?.error || 'Failed to load history');
+              }
+              return (Array.isArray(data.records) ? data.records : []).map((r: ActivityHistoryRow) => ({
+                ...r,
+                totalSeconds: r.totalSeconds + (r.approvedSeconds || 0),
+              }));
+            }}
+          />
+        )}
+
+
+        {/* ================================================================
           APPROVALS
       ================================================================= */}
 
-      {activeTab ===
-        'approvals' && (
+        {activeTab ===
+          'approvals' && (
 
-        <div className="
+            <div className="
           space-y-4
         ">
 
-          {centralPending.length ===
-            0 ? (
+              {centralPending.length ===
+                0 ? (
 
-            <div className="
+                <div className="
               p-12
               text-center
               bg-white
@@ -2440,30 +2776,30 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               rounded-2xl
             ">
 
-              <div className="
+                  <div className="
                 font-semibold
               ">
-                No pending signup
-                requests
-              </div>
+                    No pending signup
+                    requests
+                  </div>
 
-            </div>
+                </div>
 
-          ) : (
+              ) : (
 
-            <div className="
+                <div className="
               grid
               grid-cols-1
               md:grid-cols-2
               gap-4
             ">
 
-              {centralPending.map(
-                (signup) => (
+                  {centralPending.map(
+                    (signup) => (
 
-                <div
-                  key={signup.id}
-                  className="
+                      <div
+                        key={signup.id}
+                        className="
                     p-5
                     bg-white
                     dark:bg-slate-900
@@ -2473,61 +2809,61 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                     rounded-2xl
                     space-y-4
                   "
-                >
+                      >
 
-                  <div>
+                        <div>
 
-                    <div className="
+                          <div className="
                       font-bold
                       text-slate-900
                       dark:text-white
                     ">
-                      {signup.name}
-                    </div>
+                            {signup.name}
+                          </div>
 
-                    <div className="
+                          <div className="
                       text-xs
                       text-slate-500
                     ">
-                      {signup.email}
-                    </div>
+                            {signup.email}
+                          </div>
 
-                    <div className="
+                          <div className="
                       text-[11px]
                       text-slate-400
                       mt-1
                     ">
 
-                      Requested:{' '}
+                            Requested:{' '}
 
-                      {signup.requestedAt
+                            {signup.requestedAt
 
-                        ? new Date(
-                            signup
-                              .requestedAt
-                          )
-                            .toLocaleString()
+                              ? new Date(
+                                signup
+                                  .requestedAt
+                              )
+                                .toLocaleString()
 
-                        : '-'
-                      }
+                              : '-'
+                            }
 
-                    </div>
+                          </div>
 
-                  </div>
+                        </div>
 
 
-                  <div className="
+                        <div className="
                     flex
                     gap-2
                   ">
 
-                    <button
-                      onClick={() =>
-                        void approveSignup(
-                          signup
-                        )
-                      }
-                      className="
+                          <button
+                            onClick={() =>
+                              void approveSignup(
+                                signup
+                              )
+                            }
+                            className="
                         flex-1
                         py-2
                         rounded-lg
@@ -2537,18 +2873,18 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                         text-xs
                         font-bold
                       "
-                    >
-                      Approve & Activate
-                    </button>
+                          >
+                            Approve & Activate
+                          </button>
 
 
-                    <button
-                      onClick={() =>
-                        void rejectSignup(
-                          signup
-                        )
-                      }
-                      className="
+                          <button
+                            onClick={() =>
+                              void rejectSignup(
+                                signup
+                              )
+                            }
+                            className="
                         px-4
                         py-2
                         rounded-lg
@@ -2558,35 +2894,35 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                         text-xs
                         font-semibold
                       "
-                    >
-                      Reject
-                    </button>
+                          >
+                            Reject
+                          </button>
 
-                  </div>
+                        </div>
+
+                      </div>
+
+                    ))}
 
                 </div>
 
-              ))}
+              )}
 
             </div>
 
           )}
 
-        </div>
 
-      )}
-
-
-      {/* ================================================================
+        {/* ================================================================
           ACTIVITY
       ================================================================= */}
 
-      {activeTab ===
-        'activity' && (
+        {activeTab ===
+          'activity' && (
 
-        <div className="space-y-5">
+            <div className="space-y-5">
 
-          <div className="
+              <div className="
             grid
             grid-cols-1
             lg:grid-cols-[minmax(260px,25%)_minmax(0,75%)]
@@ -2594,9 +2930,9 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
             items-start
           ">
 
-            {/* LEFT 25% */}
+                {/* LEFT 25% */}
 
-            <div className="
+                <div className="
               bg-white
               dark:bg-slate-900
               border
@@ -2606,87 +2942,87 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               overflow-hidden
             ">
 
-              <div className="
+                  <div className="
                 p-4
                 border-b
                 border-slate-200
                 dark:border-slate-800
               ">
 
-                <div className="
+                    <div className="
                   flex
                   items-center
                   gap-2
                   font-bold
                 ">
 
-                  <Calendar className="
+                      <Calendar className="
                     w-4
                     h-4
                   " />
 
-                  Activity History
+                      Activity History
 
-                </div>
+                    </div>
 
-              </div>
+                  </div>
 
 
-              <div className="
+                  <div className="
                 p-4
                 space-y-4
               ">
 
-                <div>
+                    <div>
 
-                  <label className="
+                      <label className="
                     text-[11px]
                     font-bold
                     text-slate-500
                     uppercase
                   ">
-                    Employee
-                  </label>
+                        Employee
+                      </label>
 
 
-                  <select
-                    value={
-                      selectedEmployeeId
-                    }
-                    onChange={(e) => {
+                      <select
+                        value={
+                          selectedEmployeeId
+                        }
+                        onChange={(e) => {
 
-                      activityRequestRef.current +=
-                        1;
+                          activityRequestRef.current +=
+                            1;
 
-                      setHistoryRows(
-                        []
-                      );
+                          setHistoryRows(
+                            []
+                          );
 
-                      setSelectedDate(
-                        ''
-                      );
+                          setSelectedDate(
+                            ''
+                          );
 
-                      setSelectedActivity(
-                        null
-                      );
+                          setSelectedActivity(
+                            null
+                          );
 
-                      setPreviewImage(
-                        null
-                      );
+                          setPreviewImage(
+                            null
+                          );
 
-                      setSelectedHistoryYear(
-                        ''
-                      );
+                          setSelectedHistoryYear(
+                            ''
+                          );
 
-                      setSelectedHistoryMonth(
-                        ''
-                      );
+                          setSelectedHistoryMonth(
+                            ''
+                          );
 
-                      setSelectedEmployeeId(
-                        e.target.value
-                      );
-                    }}
-                    className="
+                          setSelectedEmployeeId(
+                            e.target.value
+                          );
+                        }}
+                        className="
                       mt-1
                       w-full
                       border
@@ -2699,119 +3035,119 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       py-2.5
                       text-sm
                     "
-                  >
-
-                    <option value="">
-                      Select employee
-                    </option>
-
-                    {centralUsers.map(
-                      (
-                        emp
-                      ) => (
-
-                      <option
-                        key={emp.id}
-                        value={emp.id}
                       >
-                        {emp.name}
-                        {' — '}
-                        {emp.email}
-                      </option>
 
-                    ))}
+                        <option value="">
+                          Select employee
+                        </option>
 
-                  </select>
+                        {centralUsers.map(
+                          (
+                            emp
+                          ) => (
 
-                </div>
+                            <option
+                              key={emp.id}
+                              value={emp.id}
+                            >
+                              {emp.name}
+                              {' — '}
+                              {emp.email}
+                            </option>
+
+                          ))}
+
+                      </select>
+
+                    </div>
 
 
-                <div>
+                    <div>
 
-                  <label className="
+                      <label className="
                     text-[11px]
                     font-bold
                     text-slate-500
                     uppercase
                   ">
-                    Year
-                  </label>
+                        Year
+                      </label>
 
 
-                  <select
-                    value={
-                      effectiveHistoryYear
-                    }
-                    disabled={
-                      !selectedEmployeeId ||
-                      !availableHistoryYears.length
-                    }
-                    onChange={(e) => {
+                      <select
+                        value={
+                          effectiveHistoryYear
+                        }
+                        disabled={
+                          !selectedEmployeeId ||
+                          !availableHistoryYears.length
+                        }
+                        onChange={(e) => {
 
-                      const year =
-                        e.target.value;
-
-
-                      setSelectedHistoryYear(
-                        year
-                      );
+                          const year =
+                            e.target.value;
 
 
-                      const firstMonth =
-                        Array.from(
-                          new Set(
-                            historyRows
+                          setSelectedHistoryYear(
+                            year
+                          );
 
-                              .filter(
-                                (
-                                  row
-                                ) =>
-                                  row.dateKey
-                                    .startsWith(
-                                      `${year}-`
-                                    )
-                              )
 
-                              .map(
-                                (
-                                  row
-                                ) =>
-                                  row.dateKey.slice(
-                                    0,
-                                    7
+                          const firstMonth =
+                            Array.from(
+                              new Set(
+                                historyRows
+
+                                  .filter(
+                                    (
+                                      row
+                                    ) =>
+                                      row.dateKey
+                                        .startsWith(
+                                          `${year}-`
+                                        )
+                                  )
+
+                                  .map(
+                                    (
+                                      row
+                                    ) =>
+                                      row.dateKey.slice(
+                                        0,
+                                        7
+                                      )
                                   )
                               )
-                          )
-                        )
-                          .sort(
-                            (
-                              a,
-                              b
-                            ) =>
-                              b.localeCompare(
-                                a
-                              )
-                          )[0] ||
-                        '';
+                            )
+                              .sort(
+                                (
+                                  a,
+                                  b
+                                ) =>
+                                  b.localeCompare(
+                                    a
+                                  )
+                              )[0] ||
+                            '';
 
 
-                      setSelectedHistoryMonth(
-                        firstMonth
-                      );
+                          setSelectedHistoryMonth(
+                            firstMonth
+                          );
 
-                      setSelectedDate(
-                        ''
-                      );
+                          setSelectedDate(
+                            ''
+                          );
 
-                      setSelectedActivity(
-                        null
-                      );
+                          setSelectedActivity(
+                            null
+                          );
 
-                      setPreviewImage(
-                        null
-                      );
-                    }}
-                    className="
+                          setPreviewImage(
+                            null
+                          );
+                        }}
+                        className="
                       mt-1
                       w-full
                       border
@@ -2825,75 +3161,75 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       text-sm
                       disabled:opacity-50
                     "
-                  >
-
-                    {!availableHistoryYears.length && (
-
-                      <option value="">
-                        No year available
-                      </option>
-
-                    )}
-
-
-                    {availableHistoryYears.map(
-                      (
-                        year
-                      ) => (
-
-                      <option
-                        key={year}
-                        value={year}
                       >
-                        {year}
-                      </option>
 
-                    ))}
+                        {!availableHistoryYears.length && (
 
-                  </select>
+                          <option value="">
+                            No year available
+                          </option>
 
-                </div>
+                        )}
 
 
-                <div>
+                        {availableHistoryYears.map(
+                          (
+                            year
+                          ) => (
 
-                  <label className="
+                            <option
+                              key={year}
+                              value={year}
+                            >
+                              {year}
+                            </option>
+
+                          ))}
+
+                      </select>
+
+                    </div>
+
+
+                    <div>
+
+                      <label className="
                     text-[11px]
                     font-bold
                     text-slate-500
                     uppercase
                   ">
-                    Month
-                  </label>
+                        Month
+                      </label>
 
 
-                  <select
-                    value={
-                      effectiveHistoryMonth
-                    }
-                    disabled={
-                      !effectiveHistoryYear ||
-                      !availableHistoryMonths.length
-                    }
-                    onChange={(e) => {
+                      <select
+                        value={
+                          effectiveHistoryMonth
+                        }
+                        disabled={
+                          !effectiveHistoryYear ||
+                          !availableHistoryMonths.length
+                        }
+                        onChange={(e) => {
 
-                      setSelectedHistoryMonth(
-                        e.target.value
-                      );
+                          setSelectedHistoryMonth(
+                            e.target.value
+                          );
 
-                      setSelectedDate(
-                        ''
-                      );
+                          setSelectedDate(
+                            ''
+                          );
 
-                      setSelectedActivity(
-                        null
-                      );
+                          setSelectedActivity(
+                            null
+                          );
 
-                      setPreviewImage(
-                        null
-                      );
-                    }}
-                    className="
+                          setPreviewImage(
+                            null
+                          );
+                        }}
+                        className="
                       mt-1
                       w-full
                       border
@@ -2907,51 +3243,51 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       text-sm
                       disabled:opacity-50
                     "
-                  >
-
-                    {!availableHistoryMonths.length && (
-
-                      <option value="">
-                        No month available
-                      </option>
-
-                    )}
-
-
-                    {availableHistoryMonths.map(
-                      (
-                        currentMonth
-                      ) => (
-
-                      <option
-                        key={
-                          currentMonth
-                        }
-                        value={
-                          currentMonth
-                        }
                       >
-                        {getHistoryMonthLabel(
-                          currentMonth
+
+                        {!availableHistoryMonths.length && (
+
+                          <option value="">
+                            No month available
+                          </option>
+
                         )}
-                      </option>
-
-                    ))}
-
-                  </select>
-
-                </div>
-
-              </div>
 
 
-              <div className="
+                        {availableHistoryMonths.map(
+                          (
+                            currentMonth
+                          ) => (
+
+                            <option
+                              key={
+                                currentMonth
+                              }
+                              value={
+                                currentMonth
+                              }
+                            >
+                              {getHistoryMonthLabel(
+                                currentMonth
+                              )}
+                            </option>
+
+                          ))}
+
+                      </select>
+
+                    </div>
+
+                  </div>
+
+
+                  <div className="
                 border-t
                 border-slate-200
                 dark:border-slate-800
               ">
 
-                <div className="
+                    <div className="
                   px-4
                   py-3
                   text-[11px]
@@ -2959,11 +3295,11 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   font-bold
                   text-slate-500
                 ">
-                  Dates
-                </div>
+                      Dates
+                    </div>
 
 
-                <div className="
+                    <div className="
                   max-h-[560px]
                   overflow-y-auto
                   divide-y
@@ -2971,155 +3307,176 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   dark:divide-slate-800
                 ">
 
-                  {filteredActivityDates.map(
-                    (
-                      row
-                    ) => (
+                      {filteredActivityDates.map(
+                        (
+                          row
+                        ) => (
 
-                    <button
-                      key={
-                        row.dateKey
-                      }
-                      type="button"
-                      onClick={() => {
+                          <button
+                            key={
+                              row.dateKey
+                            }
+                            type="button"
+                            onClick={() => {
 
-                        activityRequestRef.current +=
-                          1;
+                              activityRequestRef.current +=
+                                1;
 
-                        setSelectedActivity(
-                          null
-                        );
+                              setSelectedActivity(
+                                null
+                              );
 
-                        setPreviewImage(
-                          null
-                        );
+                              setPreviewImage(
+                                null
+                              );
 
-                        setSelectedDate(
-                          row.dateKey
-                        );
-                      }}
-                      className={`
+                              setSelectedDate(
+                                row.dateKey
+                              );
+                            }}
+                            className={`
                         w-full
                         text-left
                         p-4
                         transition
 
-                        ${
-                          selectedDate ===
-                          row.dateKey
+                        ${selectedDate ===
+                                row.dateKey
 
-                            ? 'bg-indigo-50 dark:bg-indigo-950/40'
+                                ? 'bg-indigo-50 dark:bg-indigo-950/40'
 
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
-                        }
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                              }
                       `}
-                    >
+                          >
 
-                      <div className="
+                            <div className="
                         font-bold
                         text-sm
                       ">
 
-                        {new Date(
-                          `${row.dateKey}T00:00:00`
-                        )
-                          .toLocaleDateString(
-                            undefined,
-                            {
-                              day:
-                                '2-digit',
+                              {new Date(
+                                `${row.dateKey}T00:00:00`
+                              )
+                                .toLocaleDateString(
+                                  undefined,
+                                  {
+                                    day:
+                                      '2-digit',
 
-                              month:
-                                'short',
+                                    month:
+                                      'short',
 
-                              year:
-                                'numeric',
-                            }
-                          )}
+                                    year:
+                                      'numeric',
+                                  }
+                                )}
 
-                      </div>
+                            </div>
 
 
-                      <div className="
+                            <div className="
                         text-[11px]
                         text-slate-500
                         mt-1
                       ">
 
-                        {formatSeconds(
-                          row.totalSeconds
+                              {formatSeconds(row.totalSeconds + (row.approvedSeconds || 0))}
+
+                              {' • '}
+
+                              {row.screenshotCount}
+
+                              {' screenshot'}
+
+                              {row.screenshotCount ===
+                                1
+                                ? ''
+                                : 's'}
+
+                            </div>
+
+                          </button>
+
+                        ))}
+
+
+                      {selectedEmployeeId &&
+                        effectiveHistoryMonth &&
+                        filteredActivityDates.length ===
+                        0 && (
+
+                          <div className="
+                      p-6
+                      text-center
+                      text-xs
+                      text-slate-500
+                    ">
+                            No activity found for this month.
+                          </div>
+
                         )}
 
-                        {' • '}
 
-                        {row.screenshotCount}
+                      {!selectedEmployeeId && (
 
-                        {' screenshot'}
-
-                        {row.screenshotCount ===
-                        1
-                          ? ''
-                          : 's'}
-
-                      </div>
-
-                    </button>
-
-                  ))}
-
-
-                  {selectedEmployeeId &&
-                    effectiveHistoryMonth &&
-                    filteredActivityDates.length ===
-                      0 && (
-
-                    <div className="
+                        <div className="
                       p-6
                       text-center
                       text-xs
                       text-slate-500
                     ">
-                      No activity found for this month.
+                          Select an employee first.
+                        </div>
+
+                      )}
+
                     </div>
 
-                  )}
-
-
-                  {!selectedEmployeeId && (
-
-                    <div className="
-                      p-6
-                      text-center
-                      text-xs
-                      text-slate-500
-                    ">
-                      Select an employee first.
-                    </div>
-
-                  )}
+                  </div>
 
                 </div>
 
-              </div>
 
-            </div>
+                {/* RIGHT 75% */}
 
-
-            {/* RIGHT 75% */}
-
-            <div className="
+                <div className="
               space-y-4
               min-w-0
             ">
 
-              <div className="
+                  {selectedEmployeeId &&
+                    historyReadyFor === selectedEmployeeId && (
+                      <MyTimeTracking
+                        mode={adminViewMode}
+                        onModeChange={setAdminViewMode}
+                        selectedDate={selectedDate || adminToday}
+                        onSelectedDateChange={handleAdminDateChange}
+                        todayKey={adminToday}
+                        records={historyRows.map((r) => ({
+                          ...r,
+                          totalSeconds: r.totalSeconds + (r.approvedSeconds || 0),
+                        }))}
+                        selectedDaySeconds={
+                          selectedActivity ? selectedActivity.totalSeconds + (selectedActivity.approvedSeconds || 0) : undefined
+                        }
+                        selectedDayScreenshots={
+                          selectedActivity ? selectedActivity.screenshotCount : undefined
+                        }
+                        onRefresh={() => void refreshSelectedEmployeeData()}
+                        formatDuration={formatSeconds}
+                      />
+                    )}
+
+
+                  <div className="
                 grid
                 grid-cols-1
                 sm:grid-cols-3
                 gap-4
               ">
 
-                <div className="
+                    <div className="
                   p-5
                   bg-white
                   dark:bg-slate-900
@@ -3129,26 +3486,26 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   rounded-2xl
                 ">
 
-                  <div className="
+                      <div className="
                     text-xs
                     text-slate-500
                   ">
-                    Selected Date
-                  </div>
+                        Selected Date
+                      </div>
 
-                  <div className="
+                      <div className="
                     text-base
                     font-black
                     mt-1
                   ">
-                    {selectedDate ||
-                      'Select a date'}
-                  </div>
+                        {selectedDate ||
+                          'Select a date'}
+                      </div>
 
-                </div>
+                    </div>
 
 
-                <div className="
+                    <div className="
                   p-5
                   bg-white
                   dark:bg-slate-900
@@ -3158,29 +3515,25 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   rounded-2xl
                 ">
 
-                  <div className="
+                      <div className="
                     text-xs
                     text-slate-500
                   ">
-                    Tracked Time
-                  </div>
+                        Tracked Time
+                      </div>
 
-                  <div className="
+                      <div className="
                     text-xl
                     font-black
                     mt-1
                   ">
-                    {formatSeconds(
-                      selectedActivity
-                        ?.totalSeconds ||
-                      0
-                    )}
-                  </div>
+                        {formatSeconds((selectedActivity?.totalSeconds || 0) + (selectedActivity?.approvedSeconds || 0))}
+                      </div>
 
-                </div>
+                    </div>
 
 
-                <div className="
+                    <div className="
                   p-5
                   bg-white
                   dark:bg-slate-900
@@ -3190,30 +3543,30 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   rounded-2xl
                 ">
 
-                  <div className="
+                      <div className="
                     text-xs
                     text-slate-500
                   ">
-                    Screenshots
-                  </div>
+                        Screenshots
+                      </div>
 
-                  <div className="
+                      <div className="
                     text-xl
                     font-black
                     mt-1
                     text-indigo-600
                   ">
-                    {selectedActivity
-                      ?.screenshotCount ||
-                      0}
+                        {selectedActivity
+                          ?.screenshotCount ||
+                          0}
+                      </div>
+
+                    </div>
+
                   </div>
 
-                </div>
 
-              </div>
-
-
-              <div className="
+                  <div className="
                 bg-white
                 dark:bg-slate-900
                 border
@@ -3224,7 +3577,7 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                 min-h-[560px]
               ">
 
-                <div className="
+                    <div className="
                   p-4
                   border-b
                   border-slate-200
@@ -3235,57 +3588,57 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   gap-3
                 ">
 
-                  <div>
+                      <div>
 
-                    <div className="
+                        <div className="
                       font-bold
                       text-sm
                     ">
-                      Screenshots
-                    </div>
+                          Screenshots
+                        </div>
 
 
-                    <div className="
+                        <div className="
                       text-[11px]
                       text-slate-500
                       mt-0.5
                     ">
 
-                      {selectedEmployee
-                        ?.name ||
-                        'Select employee'}
+                          {selectedEmployee
+                            ?.name ||
+                            'Select employee'}
 
-                      {' • '}
+                          {' • '}
 
-                      {selectedDate ||
-                        'Select date'}
+                          {selectedDate ||
+                            'Select date'}
 
-                    </div>
+                        </div>
 
-                  </div>
+                      </div>
 
 
-                  <div className="
+                      <div className="
                     text-xs
                     font-bold
                     text-indigo-600
                   ">
-                    {selectedActivity
-                      ?.screenshotCount ||
-                      0}{' '}
-                    captures
-                  </div>
+                        {selectedActivity
+                          ?.screenshotCount ||
+                          0}{' '}
+                        captures
+                      </div>
 
-                </div>
+                    </div>
 
 
-                <div className="p-4">
+                    <div className="p-4">
 
-                  {selectedActivity
-                    ?.screenshots
-                    ?.length ? (
+                      {selectedActivity
+                        ?.screenshots
+                        ?.length ? (
 
-                    <div className="
+                        <div className="
                       grid
                       grid-cols-1
                       md:grid-cols-2
@@ -3293,26 +3646,24 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       gap-4
                     ">
 
-                      {selectedActivity
-                        .screenshots
-                        .map(
-                          (
-                            screen:
-                              ScreenshotItem
-                          ) => (
+                          {adminPagination.pageItems.map(
+                              (
+                                screen:
+                                  ScreenshotItem
+                              ) => (
 
-                        <button
-                          key={
-                            screen.id ||
-                            screen.localUrl
-                          }
-                          type="button"
-                          onClick={() =>
-                            setPreviewImage(
-                              screen
-                            )
-                          }
-                          className="
+                                <button
+                                  key={
+                                    screen.id ||
+                                    screen.localUrl
+                                  }
+                                  type="button"
+                                  onClick={() =>
+                                    setPreviewImage(
+                                      screen
+                                    )
+                                  }
+                                  className="
                             text-left
                             rounded-xl
                             overflow-hidden
@@ -3322,113 +3673,112 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                             hover:border-indigo-400
                             bg-slate-950
                           "
-                        >
+                                >
 
-                          <img
-                            src={
-                              screen.localUrl
-                            }
-                            alt={
-                              screen.fileName
-                            }
-                            loading="lazy"
-                            className="
+                                  <img
+                                    src={
+                                      screen.localUrl
+                                    }
+                                    alt={
+                                      screen.fileName
+                                    }
+                                    loading="lazy"
+                                    className="
                               w-full
                               aspect-video
                               object-cover
                             "
-                            onError={(
-                              event
-                            ) => {
+                                    onError={(
+                                      event
+                                    ) => {
 
-                              console.error(
-                                'Screenshot image failed:',
-                                screen.fileName,
-                                screen.localUrl
-                              );
+                                      console.error(
+                                        'Screenshot image failed:',
+                                        screen.fileName,
+                                        screen.localUrl
+                                      );
 
-                              event
-                                .currentTarget
-                                .style
-                                .display =
-                                'none';
-                            }}
-                          />
-
-
-                         
-<div className="p-2 bg-white dark:bg-slate-900">
-  <div className="text-[11px] truncate mb-2 text-slate-700 dark:text-slate-200">
-    {screen.fileName}
-  </div>
-  
-<div className="mb-3">
-  <div className="flex items-center justify-between mb-1">
-    <span className="text-[10px] font-semibold text-slate-500">
-      Activity
-    </span>
-    <span className="text-xs font-bold text-slate-900 dark:text-white">
-      {Math.max(0, Math.min(100, Number(screen.activityCounts?.activityPercent) || 0))}%
-    </span>
-  </div>
-  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-    <div
-      className={`h-full rounded-full transition-all ${
-        (Number(screen.activityCounts?.activityPercent) || 0) === 0
-          ? 'bg-slate-400'
-          : (Number(screen.activityCounts?.activityPercent) || 0) <= 25
-            ? 'bg-red-500'
-            : (Number(screen.activityCounts?.activityPercent) || 0) <= 55
-              ? 'bg-orange-500'
-              : 'bg-emerald-500'
-      }`}
-      style={{
-        width: `${Math.max(0, Math.min(100, Number(screen.activityCounts?.activityPercent) || 0))}%`,
-      }}
-    />
-  </div>
-</div>
-
-  <div className="grid grid-cols-3 gap-2">
-    <div className="rounded-md bg-slate-100 dark:bg-slate-800 p-2">
-      <div className="text-[10px] text-slate-500">
-        Mouse Moves
-      </div>
-      <div className="text-sm font-semibold text-slate-900 dark:text-white">
-        {screen.activityCounts?.mouseMoves ?? 0}
-      </div>
-    </div>
-
-    <div className="rounded-md bg-slate-100 dark:bg-slate-800 p-2">
-      <div className="text-[10px] text-slate-500">
-        Clicks
-      </div>
-      <div className="text-sm font-semibold text-slate-900 dark:text-white">
-        {screen.activityCounts?.mouseClicks ?? 0}
-      </div>
-    </div>
-
-    <div className="rounded-md bg-slate-100 dark:bg-slate-800 p-2">
-      <div className="text-[10px] text-slate-500">
-        Key Presses
-      </div>
-      <div className="text-sm font-semibold text-slate-900 dark:text-white">
-        {screen.activityCounts?.keyPresses ?? 0}
-      </div>
-    </div>
-  </div>
-</div>
+                                      event
+                                        .currentTarget
+                                        .style
+                                        .display =
+                                        'none';
+                                    }}
+                                  />
 
 
-                        </button>
 
-                      ))}
+                                  <div className="p-2 bg-white dark:bg-slate-900">
+                                    <div className="text-[11px] truncate mb-2 text-slate-700 dark:text-slate-200">
+                                      {screen.fileName}
+                                    </div>
 
-                    </div>
+                                    <div className="mb-3">
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className="text-[10px] font-semibold text-slate-500">
+                                          Activity
+                                        </span>
+                                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                          {Math.max(0, Math.min(100, Number(screen.activityCounts?.activityPercent) || 0))}%
+                                        </span>
+                                      </div>
+                                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                                        <div
+                                          className={`h-full rounded-full transition-all ${(Number(screen.activityCounts?.activityPercent) || 0) === 0
+                                              ? 'bg-slate-400'
+                                              : (Number(screen.activityCounts?.activityPercent) || 0) <= 25
+                                                ? 'bg-red-500'
+                                                : (Number(screen.activityCounts?.activityPercent) || 0) <= 55
+                                                  ? 'bg-orange-500'
+                                                  : 'bg-emerald-500'
+                                            }`}
+                                          style={{
+                                            width: `${Math.max(0, Math.min(100, Number(screen.activityCounts?.activityPercent) || 0))}%`,
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
 
-                  ) : (
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div className="rounded-md bg-slate-100 dark:bg-slate-800 p-2">
+                                        <div className="text-[10px] text-slate-500">
+                                          Mouse Moves
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                                          {screen.activityCounts?.mouseMoves ?? 0}
+                                        </div>
+                                      </div>
 
-                    <div className="
+                                      <div className="rounded-md bg-slate-100 dark:bg-slate-800 p-2">
+                                        <div className="text-[10px] text-slate-500">
+                                          Clicks
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                                          {screen.activityCounts?.mouseClicks ?? 0}
+                                        </div>
+                                      </div>
+
+                                      <div className="rounded-md bg-slate-100 dark:bg-slate-800 p-2">
+                                        <div className="text-[10px] text-slate-500">
+                                          Key Presses
+                                        </div>
+                                        <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                                          {screen.activityCounts?.keyPresses ?? 0}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+
+                                </button>
+
+                              ))}
+
+                        </div>
+
+                      ) : (
+
+                        <div className="
                       min-h-[470px]
                       flex
                       flex-col
@@ -3438,30 +3788,43 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       text-slate-500
                     ">
 
-                      <FileImage className="
+                          <FileImage className="
                         w-9
                         h-9
                         mb-3
                       " />
 
 
-                      <div className="
+                          <div className="
                         text-sm
                         font-semibold
                       ">
 
-                        {selectedDate
+                            {selectedDate
 
-                          ? 'No screenshots for this date'
+                              ? 'No screenshots for this date'
 
-                          : 'Select a date to view screenshots'
-                        }
+                              : 'Select a date to view screenshots'
+                            }
 
-                      </div>
+                          </div>
+
+                        </div>
+
+                      )}
+
+                    <PaginationControls
+                      page={adminPagination.page}
+                      totalPages={adminPagination.totalPages}
+                      totalItems={adminPagination.totalItems}
+                      firstItemNumber={adminPagination.firstItemNumber}
+                      lastItemNumber={adminPagination.lastItemNumber}
+                      onPageChange={adminPagination.setPage}
+                    />
 
                     </div>
 
-                  )}
+                  </div>
 
                 </div>
 
@@ -3469,21 +3832,28 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
 
             </div>
 
-          </div>
-
-        </div>
-
-      )}
+          )}
 
 
-      {/* ================================================================
+        {/* ================================================================
           GLOBAL CAPTURE SETTINGS
       ================================================================= */}
 
-      {activeTab ===
-        'storage' && (
+        {activeTab === 'forgotten' && (
+          <AdminForgottenTime
+            request={apiFetch}
+            employees={centralUsers.map((u) => ({ id: u.id, name: u.name }))}
+            onChanged={() => {
+              void refreshCentralData(true);
+              void refreshSelectedEmployeeData();
+            }}
+          />
+        )}
 
-        <div className="
+        {activeTab ===
+          'storage' && (
+
+            <div className="
           bg-white
           dark:bg-slate-900
           border
@@ -3494,47 +3864,47 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
           space-y-6
         ">
 
-          <div>
+              <div>
 
-            <h2 className="
+                <h2 className="
               text-lg
               font-bold
             ">
-              Global Screenshot
-              Capture Policy
-            </h2>
+                  Global Screenshot
+                  Capture Policy
+                </h2>
 
-            <p className="
+                <p className="
               text-xs
               text-slate-500
               mt-1
             ">
-              Saving here updates
-              the central server.
-              All open employee PCs
-              poll the setting and
-              switch automatically.
-            </p>
+                  Saving here updates
+                  the central server.
+                  All open employee PCs
+                  poll the setting and
+                  switch automatically.
+                </p>
 
-          </div>
+              </div>
 
 
-          <div className="
+              <div className="
             space-y-3
           ">
 
-            <label className="
+                <label className="
               text-xs
               font-bold
               uppercase
               text-slate-500
             ">
-              Random Screenshot
-              Presets
-            </label>
+                  Random Screenshot
+                  Presets
+                </label>
 
 
-            <div className="
+                <div className="
               grid
               grid-cols-2
               sm:grid-cols-3
@@ -3542,136 +3912,135 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               gap-2
             ">
 
-              {[
-                {
-                  id:
-                    '10s-1',
+                  {[
+                    {
+                      id:
+                        '10s-1',
 
-                  label:
-                    '10 sec / 1 SS',
+                      label:
+                        '10 sec / 1 SS',
 
-                  window:
-                    10,
+                      window:
+                        10,
 
-                  shots:
-                    1,
-                },
+                      shots:
+                        1,
+                    },
 
-                {
-                  id:
-                    '1m-3',
+                    {
+                      id:
+                        '1m-3',
 
-                  label:
-                    '1 min / 3 SS',
+                      label:
+                        '1 min / 3 SS',
 
-                  window:
-                    60,
+                      window:
+                        60,
 
-                  shots:
-                    3,
-                },
+                      shots:
+                        3,
+                    },
 
-                {
-                  id:
-                    '2m-3',
+                    {
+                      id:
+                        '2m-3',
 
-                  label:
-                    '2 min / 3 SS',
+                      label:
+                        '2 min / 3 SS',
 
-                  window:
-                    120,
+                      window:
+                        120,
 
-                  shots:
-                    3,
-                },
+                      shots:
+                        3,
+                    },
 
-                {
-                  id:
-                    '5m-5',
+                    {
+                      id:
+                        '5m-5',
 
-                  label:
-                    '5 min / 5 SS',
+                      label:
+                        '5 min / 5 SS',
 
-                  window:
-                    300,
+                      window:
+                        300,
 
-                  shots:
-                    5,
-                },
+                      shots:
+                        5,
+                    },
 
-                {
-                  id:
-                    '10m-5',
+                    {
+                      id:
+                        '10m-5',
 
-                  label:
-                    '10 min / 5 SS',
+                      label:
+                        '10 min / 5 SS',
 
-                  window:
-                    600,
+                      window:
+                        600,
 
-                  shots:
-                    5,
-                },
+                      shots:
+                        5,
+                    },
 
-                {
-                  id:
-                    '15m-5',
+                    {
+                      id:
+                        '15m-5',
 
-                  label:
-                    '15 min / 5 SS',
+                      label:
+                        '15 min / 5 SS',
 
-                  window:
-                    900,
+                      window:
+                        900,
 
-                  shots:
-                    5,
-                },
+                      shots:
+                        5,
+                    },
 
-              ].map(
-                (
-                  opt
-                ) => (
+                  ].map(
+                    (
+                      opt
+                    ) => (
 
-                <button
-                  key={
-                    opt.id
-                  }
-                  type="button"
-                  onClick={() =>
-                    applyPreset(
-                      opt.id,
-                      opt.window,
-                      opt.shots
-                    )
-                  }
-                  className={`
+                      <button
+                        key={
+                          opt.id
+                        }
+                        type="button"
+                        onClick={() =>
+                          applyPreset(
+                            opt.id,
+                            opt.window,
+                            opt.shots
+                          )
+                        }
+                        className={`
                     p-3
                     rounded-xl
                     border
                     text-xs
                     font-bold
 
-                    ${
-                      presetId ===
-                      opt.id
+                    ${presetId ===
+                            opt.id
 
-                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300'
+                            ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300'
 
-                        : 'border-slate-200 dark:border-slate-700'
-                    }
+                            : 'border-slate-200 dark:border-slate-700'
+                          }
                   `}
-                >
-                  {opt.label}
-                </button>
+                      >
+                        {opt.label}
+                      </button>
 
-              ))}
+                    ))}
 
-            </div>
+                </div>
 
 
-            {/* CUSTOM */}
+                {/* CUSTOM */}
 
-            <div className="
+                <div className="
               rounded-xl
               border
               border-slate-200
@@ -3680,74 +4049,74 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               space-y-3
             ">
 
-              <div>
+                  <div>
 
-                <div className="
+                    <div className="
                   text-xs
                   font-bold
                 ">
-                  Custom Random Policy
-                </div>
+                      Custom Random Policy
+                    </div>
 
-                <div className="
+                    <div className="
                   text-[11px]
                   text-slate-500
                   mt-1
                 ">
-                  Example: 10 minutes +
-                  20 screenshots =
-                  exactly 20 screenshots
-                  at fresh random times
-                  within every
-                  10-minute window.
-                </div>
+                      Example: 10 minutes +
+                      20 screenshots =
+                      exactly 20 screenshots
+                      at fresh random times
+                      within every
+                      10-minute window.
+                    </div>
 
-              </div>
+                  </div>
 
 
-              <div className="
+                  <div className="
                 grid
                 sm:grid-cols-2
                 gap-3
               ">
 
-                <label className="
+                    <label className="
                   space-y-1
                 ">
 
-                  <span className="
+                      <span className="
                     text-[11px]
                     font-bold
                     uppercase
                     text-slate-500
                   ">
-                    Duration (minutes)
-                  </span>
+                        Duration (minutes)
+                      </span>
 
 
-                  <input
-                    type="number"
-                    min={1}
-                    max={1440}
-                    value={
-                      customMinutes
-                    }
-                    onChange={(e) => {
+                      <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        value={
+                          customMinutes
+                        }
+                        onChange={(e) => {
 
-                      captureEditingRef.current =
-                        true;
+                          captureEditingRef.current =
+                            true;
 
-                      setCustomMinutes(
-                        Math.max(
-                          1,
-                          Number(
-                            e.target
-                              .value
-                          ) || 1
-                        )
-                      );
-                    }}
-                    className="
+                          setCustomMinutes(
+                            Math.max(
+                              1,
+                              Number(
+                                e.target
+                                  .value
+                              ) || 1
+                            )
+                          );
+                        }}
+                        className="
                       w-full
                       rounded-lg
                       border
@@ -3758,48 +4127,48 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       py-2
                       text-sm
                     "
-                  />
+                      />
 
-                </label>
+                    </label>
 
 
-                <label className="
+                    <label className="
                   space-y-1
                 ">
 
-                  <span className="
+                      <span className="
                     text-[11px]
                     font-bold
                     uppercase
                     text-slate-500
                   ">
-                    Screenshots
-                  </span>
+                        Screenshots
+                      </span>
 
 
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={
-                      customScreenshots
-                    }
-                    onChange={(e) => {
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={
+                          customScreenshots
+                        }
+                        onChange={(e) => {
 
-                      captureEditingRef.current =
-                        true;
+                          captureEditingRef.current =
+                            true;
 
-                      setCustomScreenshots(
-                        Math.max(
-                          1,
-                          Number(
-                            e.target
-                              .value
-                          ) || 1
-                        )
-                      );
-                    }}
-                    className="
+                          setCustomScreenshots(
+                            Math.max(
+                              1,
+                              Number(
+                                e.target
+                                  .value
+                              ) || 1
+                            )
+                          );
+                        }}
+                        className="
                       w-full
                       rounded-lg
                       border
@@ -3810,19 +4179,19 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                       py-2
                       text-sm
                     "
-                  />
+                      />
 
-                </label>
+                    </label>
 
-              </div>
+                  </div>
 
 
-              <button
-                type="button"
-                onClick={
-                  applyCustomPolicy
-                }
-                className="
+                  <button
+                    type="button"
+                    onClick={
+                      applyCustomPolicy
+                    }
+                    className="
                   px-4
                   py-2
                   rounded-lg
@@ -3832,22 +4201,22 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
                   text-xs
                   font-bold
                 "
-              >
-                Apply Custom
-              </button>
+                  >
+                    Apply Custom
+                  </button>
 
-            </div>
+                </div>
 
-          </div>
+              </div>
 
 
-          <div className="
+              <div className="
             grid
             md:grid-cols-2
             gap-4
           ">
 
-            <div className="
+                <div className="
               rounded-xl
               border
               border-slate-200
@@ -3855,36 +4224,36 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               p-4
             ">
 
-              <div className="
+                  <div className="
                 text-xs
                 text-slate-500
               ">
-                Selected Window
-              </div>
+                    Selected Window
+                  </div>
 
-              <div className="
+                  <div className="
                 mt-1
                 text-lg
                 font-black
               ">
 
-                {captureWindowSeconds <
-                60
+                    {captureWindowSeconds <
+                      60
 
-                  ? `${captureWindowSeconds} sec`
+                      ? `${captureWindowSeconds} sec`
 
-                  : `${Math.round(
-                      captureWindowSeconds /
+                      : `${Math.round(
+                        captureWindowSeconds /
                         60
-                    )} min`
-                }
+                      )} min`
+                    }
 
-              </div>
+                  </div>
 
-            </div>
+                </div>
 
 
-            <div className="
+                <div className="
               rounded-xl
               border
               border-slate-200
@@ -3892,27 +4261,27 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               p-4
             ">
 
-              <div className="
+                  <div className="
                 text-xs
                 text-slate-500
               ">
-                Screenshots per Window
-              </div>
+                    Screenshots per Window
+                  </div>
 
-              <div className="
+                  <div className="
                 mt-1
                 text-lg
                 font-black
               ">
-                {screenshotsPerWindow}
+                    {screenshotsPerWindow}
+                  </div>
+
+                </div>
+
               </div>
 
-            </div>
 
-          </div>
-
-
-          <label className="
+              <label className="
             flex
             items-center
             gap-3
@@ -3923,56 +4292,56 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
             p-4
           ">
 
-            <input
-              type="checkbox"
-              checked={
-                lockIntervalForEmployees
-              }
-              onChange={(e) => {
+                <input
+                  type="checkbox"
+                  checked={
+                    lockIntervalForEmployees
+                  }
+                  onChange={(e) => {
 
-                captureEditingRef.current =
-                  true;
+                    captureEditingRef.current =
+                      true;
 
-                setLockIntervalForEmployees(
-                  e.target
-                    .checked
-                );
-              }}
-            />
+                    setLockIntervalForEmployees(
+                      e.target
+                        .checked
+                    );
+                  }}
+                />
 
 
-            <div>
+                <div>
 
-              <div className="
+                  <div className="
                 text-sm
                 font-bold
               ">
-                Lock capture policy
-                for employees
-              </div>
+                    Lock capture policy
+                    for employees
+                  </div>
 
-              <div className="
+                  <div className="
                 text-[11px]
                 text-slate-500
               ">
-                Employees will use
-                the global capture
-                policy configured
-                here.
-              </div>
+                    Employees will use
+                    the global capture
+                    policy configured
+                    here.
+                  </div>
 
-            </div>
+                </div>
 
-          </label>
+              </label>
 
 
-          <button
-            type="button"
-            onClick={() =>
-              void saveGlobalCaptureSettings()
-            }
-            disabled={loading}
-            className="
+              <button
+                type="button"
+                onClick={() =>
+                  void saveGlobalCaptureSettings()
+                }
+                disabled={loading}
+                className="
               inline-flex
               items-center
               gap-2
@@ -3986,55 +4355,55 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
               text-sm
               font-bold
             "
-          >
+              >
 
-            <Save className="
+                <Save className="
               w-4
               h-4
             " />
 
-            Save Global Settings
+                Save Global Settings
 
-          </button>
+              </button>
 
 
-          <div className="
+              <div className="
             text-[11px]
             text-slate-500
           ">
-            Capture mode:{' '}
-            {captureMode}
+                Capture mode:{' '}
+                {captureMode}
 
-            {' • '}
+                {' • '}
 
-            Interval:{' '}
-            {captureIntervalSeconds}
-            s
+                Interval:{' '}
+                {captureIntervalSeconds}
+                s
 
-            {' • '}
+                {' • '}
 
-            Employee lock:{' '}
+                Employee lock:{' '}
 
-            {lockIntervalForEmployees
-              ? 'On'
-              : 'Off'
-            }
+                {lockIntervalForEmployees
+                  ? 'On'
+                  : 'Off'
+                }
 
-          </div>
+              </div>
 
-        </div>
+            </div>
 
-      )}
+          )}
 
 
-      {/* ================================================================
+        {/* ================================================================
           SCREENSHOT PREVIEW MODAL
       ================================================================= */}
 
-      {previewImage && (
+        {previewImage && (
 
-        <div
-          className="
+          <div
+            className="
             fixed
             inset-0
             z-[100]
@@ -4044,91 +4413,91 @@ trackedSeconds: Number(snapshot.trackedSeconds || 0),
             items-center
             justify-center
           "
-          onClick={() =>
-            setPreviewImage(
-              null
-            )
-          }
-        >
+            onClick={() =>
+              setPreviewImage(
+                null
+              )
+            }
+          >
 
-          <div
-            className="
+            <div
+              className="
               relative
               max-w-7xl
               w-full
             "
-            onClick={(
-              event
-            ) =>
-              event
-                .stopPropagation()
-            }
-          >
+              onClick={(
+                event
+              ) =>
+                event
+                  .stopPropagation()
+              }
+            >
 
-            <div className="
+              <div className="
               flex
               justify-end
               mb-2
             ">
 
-              <button
-                onClick={() =>
-                  setPreviewImage(
-                    null
-                  )
-                }
-                className="
+                <button
+                  onClick={() =>
+                    setPreviewImage(
+                      null
+                    )
+                  }
+                  className="
                   text-white
                   p-2
                 "
-              >
+                >
 
-                <X className="
+                  <X className="
                   w-6
                   h-6
                 " />
 
-              </button>
+                </button>
 
-            </div>
+              </div>
 
 
-            <img
-              src={
-                previewImage.localUrl
-              }
-              alt={
-                previewImage.fileName
-              }
-              className="
+              <img
+                src={
+                  previewImage.localUrl
+                }
+                alt={
+                  previewImage.fileName
+                }
+                className="
                 max-h-[85vh]
                 w-auto
                 mx-auto
                 rounded-xl
                 shadow-2xl
               "
-              onError={(event) => {
+                onError={(event) => {
 
-                console.error(
-                  'Preview screenshot failed:',
-                  previewImage.fileName,
-                  previewImage.localUrl
-                );
+                  console.error(
+                    'Preview screenshot failed:',
+                    previewImage.fileName,
+                    previewImage.localUrl
+                  );
 
-                event
-                  .currentTarget
-                  .style
-                  .display =
-                  'none';
-              }}
-            />
+                  event
+                    .currentTarget
+                    .style
+                    .display =
+                    'none';
+                }}
+              />
+
+            </div>
 
           </div>
 
-        </div>
+        )}
 
-      )}
-
-    </div>
-  );
-};
+      </div>
+    );
+  };

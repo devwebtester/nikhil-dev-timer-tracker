@@ -279,6 +279,16 @@ export default defineConfig(({ command }) => {
 
       // Ignore generated Wrangler database files to prevent
       // unwanted full-page reloads during local development.
+      // watch: disableHmr
+      //   ? null
+      //   : {
+      //       ignored: [
+      //         '**/.wrangler/**',
+      //         '**/node_modules/**',
+      //         '**/dist/**',
+      //       ],
+      //     },
+
       watch: disableHmr
         ? null
         : {
@@ -286,9 +296,11 @@ export default defineConfig(({ command }) => {
               '**/.wrangler/**',
               '**/node_modules/**',
               '**/dist/**',
+              '**/data/**',
+              '**/screenshots/**',
+              '**/*.webp',
             ],
           },
-
       // HTTPS is only used for local development.
       ...(isDev && hasLocalCertificates
         ? {

@@ -246,11 +246,19 @@ export async function uploadScreenshotLocally(
    HOURLY BATCH CLOUD UPLOAD
 ========================================================================== */
 
-export async function flushScreenshotUploadQueue(): Promise<number> {
+// export async function flushScreenshotUploadQueue(): Promise<number> {
+export async function flushScreenshotUploadQueue(
+  employeeId?: string
+): Promise<number> {
   if (typeof window === 'undefined') return 0;
   if (!isCloudUploadWindowOpen()) return 0;
 
-  const items = await getQueuedScreenshots();
+  // const items = await getQueuedScreenshots();
+  const allItems = await getQueuedScreenshots();
+
+const items = employeeId
+  ? allItems.filter((item) => item.employeeId === employeeId)
+  : allItems;
   const now = Date.now();
 
   if (!canStartHourlyFlush(items, now)) return 0;
@@ -304,10 +312,18 @@ export async function flushScreenshotUploadQueue(): Promise<number> {
         data = null;
       }
 
-      if (!response.ok || !data?.success) {
-        console.warn('Screenshot batch upload deferred:', response.status, data);
-        break;
-      }
+      // if (!response.ok || !data?.success) {
+      //   console.warn('Screenshot batch upload deferred:', response.status, data);
+      //   break;
+      // }
+      if (
+  !response.ok ||
+  !data ||
+  !Array.isArray(data.uploadedIds)
+) {
+  console.warn('Screenshot batch upload deferred:', response.status, data);
+  break;
+}
 
       const uploadedIds = Array.isArray(data.uploadedIds)
         ? data.uploadedIds.filter((id: unknown): id is string => typeof id === 'string')
@@ -319,11 +335,26 @@ export async function flushScreenshotUploadQueue(): Promise<number> {
       }
 
       // If the worker reports partial failure, keep failed screenshots locally.
-      if (data.failedCount > 0) {
-        break;
-      }
+      // if (data.failedCount > 0) {
+      //   break;
+      // }
 
-      offset += batch.length;
+      // offset += batch.length;
+      if (data.failedCount > 0) {
+  console.warn(
+    'Some screenshots remain queued:',
+    data.failedCount
+  );
+}
+
+if (
+  uploadedIds.length === 0 &&
+  Number(data.failedCount || 0) === 0
+) {
+  break;
+}
+
+offset += batch.length;
     }
 
     if (uploadedCount > 0) {
@@ -336,7 +367,10 @@ export async function flushScreenshotUploadQueue(): Promise<number> {
   }
 }
 
-export function startScreenshotUploadScheduler(): () => void {
+// export function startScreenshotUploadScheduler(): () => void {
+export function startScreenshotUploadScheduler(
+  employeeId?: string
+): () => void {
   if (typeof window === 'undefined') return () => {};
 
   let running = false;
@@ -345,7 +379,8 @@ export function startScreenshotUploadScheduler(): () => void {
     if (running) return;
     running = true;
     try {
-      await flushScreenshotUploadQueue();
+      // await flushScreenshotUploadQueue();
+      await flushScreenshotUploadQueue(employeeId);
     } finally {
       running = false;
     }
