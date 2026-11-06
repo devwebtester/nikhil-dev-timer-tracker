@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ee60a6b7-20e7-48ed-9fbe-1eb15b15e259",
+    "employeeId": "employee-001",
+    "employeeName": "Test Employee",
+    "date": "2026-11-06",
+    "startTime": "15:22",
+    "endTime": "16:22",
+    "requestedSeconds": 3600,
+    "reason": "I forgot my timer",
+    "status": "approved",
+    "createdAt": "2026-11-06T10:53:16.423Z",
+    "adminId": "admin-master",
+    "adminResponse": "",
+    "decidedAt": "2026-11-06T10:53:36.048Z",
+    "approvedSeconds": 3600
+  },
+  {
+    "id": "0974bd7a-1daf-4b2c-a412-88dc566b46c7",
+    "employeeId": "employee-001",
+    "employeeName": "Test Employee",
+    "date": "2026-11-06",
+    "startTime": "09:00",
+    "endTime": "12:00",
+    "requestedSeconds": 10800,
+    "reason": "forgot",
+    "status": "approved",
+    "createdAt": "2026-11-06T11:08:52.525Z",
+    "adminId": "admin-master",
+    "adminResponse": "",
+    "decidedAt": "2026-11-06T11:09:05.168Z",
+    "approvedSeconds": 10800
+  },
+  {
+    "id": "98638f12-cd17-4ba8-bad5-781d8e5646e4",
+    "employeeId": "employee-001",
+    "employeeName": "Test Employee",
+    "date": "2026-11-06",
+    "startTime": "12:01",
+    "endTime": "13:01",
+    "requestedSeconds": 3600,
+    "reason": "FORGOT",
+    "status": "declined",
+    "createdAt": "2026-11-06T11:10:29.092Z",
+    "adminId": "admin-master",
+    "adminResponse": "No I can't except this",
+    "decidedAt": "2026-11-06T11:10:53.985Z",
+    "approvedSeconds": 0
+  }
+]
