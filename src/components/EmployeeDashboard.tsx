@@ -9479,12 +9479,39 @@ export const EmployeeDashboard:
         // so events occurring during a slow upload belong to the next interval.
         // Snapshot global Windows input first. If the optional agent is not
         // running, counts fall back to zero.
+        // const globalCounts = await callGlobalActivityAgent('snapshot');
+
+        // const activityCounts: ScreenshotActivityCounts = {
+        //   mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
+        //   mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
+        //   keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
+        //   activityPercent: Math.min(
+        //     100,
+        //     Math.max(0, Number(globalCounts?.activityPercent) || 0)
+        //   ),
+        //   activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
+        //   trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
+        // };
+
+        // activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
+        // lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
+                // Freeze browser-side counts first and reset them right away, so events
+        // during the await below belong to the next interval.
+        const browserCounts = { ...activityCountsRef.current };
+        activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
+        lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
+
+        // Global Windows input from the optional agent. If the agent is not
+        // running, fall back to the counts captured in the browser.
         const globalCounts = await callGlobalActivityAgent('snapshot');
+        const agentRunning = globalCounts !== null;
+        const pick = (agentValue: unknown, browserValue: number) =>
+          Math.max(0, Number(agentRunning ? agentValue : browserValue) || 0);
 
         const activityCounts: ScreenshotActivityCounts = {
-          mouseMoves: Math.max(0, Number(globalCounts?.mouseMoves) || 0),
-          mouseClicks: Math.max(0, Number(globalCounts?.mouseClicks) || 0),
-          keyPresses: Math.max(0, Number(globalCounts?.keyPresses) || 0),
+          mouseMoves: pick(globalCounts?.mouseMoves, browserCounts.mouseMoves),
+          mouseClicks: pick(globalCounts?.mouseClicks, browserCounts.mouseClicks),
+          keyPresses: pick(globalCounts?.keyPresses, browserCounts.keyPresses),
           activityPercent: Math.min(
             100,
             Math.max(0, Number(globalCounts?.activityPercent) || 0)
@@ -9492,9 +9519,6 @@ export const EmployeeDashboard:
           activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
           trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
         };
-
-        activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
-        lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
 
         const result =
           await uploadScreenshotLocally(
