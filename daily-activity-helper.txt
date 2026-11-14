@@ -1,0 +1,104 @@
+﻿
+> server-mohit.js:3618:function getDailyActivityTotals(
+  server-mohit.js:3619:  employeeId
+  server-mohit.js:3620:) {
+  server-mohit.js:3621:  const days =
+  server-mohit.js:3622:    readActivityDb()[
+  server-mohit.js:3623:      employeeId
+  server-mohit.js:3624:    ] || {};
+  server-mohit.js:3625:
+  server-mohit.js:3626:  const result = {};
+  server-mohit.js:3627:
+  server-mohit.js:3628:  Object.keys(days).forEach(
+  server-mohit.js:3629:    (dateKey) => {
+  server-mohit.js:3630:      const totals = {
+  server-mohit.js:3631:        activeSeconds: 0,
+  server-mohit.js:3632:        trackedSeconds: 0,
+  server-mohit.js:3633:        mouseMoves: 0,
+  server-mohit.js:3634:        mouseClicks: 0,
+  server-mohit.js:3635:        keyPresses: 0,
+  server-mohit.js:3636:      };
+  server-mohit.js:3637:
+  server-mohit.js:3638:      Object.values(
+  server-mohit.js:3639:        days[dateKey] || {}
+  server-mohit.js:3640:      ).forEach((item) => {
+  server-mohit.js:3641:        totals.activeSeconds +=
+  server-mohit.js:3642:          Number(item.activeSeconds || 0);
+  server-mohit.js:3643:        totals.trackedSeconds +=
+  server-mohit.js:3644:          Number(item.trackedSeconds || 0);
+  server-mohit.js:3645:        totals.mouseMoves +=
+  server-mohit.js:3646:          Number(item.mouseMoves || 0);
+  server-mohit.js:3647:        totals.mouseClicks +=
+  server-mohit.js:3648:          Number(item.mouseClicks || 0);
+  server-mohit.js:3649:        totals.keyPresses +=
+  server-mohit.js:3650:          Number(item.keyPresses || 0);
+  server-mohit.js:3651:      });
+  server-mohit.js:3652:
+  server-mohit.js:3653:      result[dateKey] = {
+  server-mohit.js:3654:        ...totals,
+  server-mohit.js:3655:        activityPercent:
+  server-mohit.js:3656:          totals.trackedSeconds > 0
+  server-mohit.js:3657:            ? Math.min(
+  server-mohit.js:3658:                100,
+  server-mohit.js:3659:                Math.round(
+  server-mohit.js:3660:                  (totals.activeSeconds /
+  server-mohit.js:3661:                    totals.trackedSeconds) *
+  server-mohit.js:3662:                    100
+  server-mohit.js:3663:                )
+  server-mohit.js:3664:              )
+  server-mohit.js:3665:            : null,
+  server-mohit.js:3666:      };
+  server-mohit.js:3667:    }
+  server-mohit.js:3668:  );
+  server-mohit.js:3669:
+  server-mohit.js:3670:  return result;
+  server-mohit.js:3671:}
+  server-mohit.js:3672:
+  server-mohit.js:3673:app.post(
+  server-mohit.js:3674:  '/api/activity-snapshot',
+  server-mohit.js:3675:  (
+  server-mohit.js:3676:    req,
+  server-mohit.js:3677:    res
+  server-mohit.js:3678:  ) => {
+  server-mohit.js:3679:    try {
+  server-mohit.js:3680:      const body =
+  server-mohit.js:3681:        req.body || {};
+  server-mohit.js:3682:
+  server-mohit.js:3683:      const employeeId =
+  server-mohit.js:3684:        String(
+  server-mohit.js:3685:          body.employeeId || ''
+  server-mohit.js:3686:        ).trim();
+  server-mohit.js:3687:
+  server-mohit.js:3688:      const employee =
+  server-mohit.js:3689:        employeeId
+  server-mohit.js:3690:          ? findEmployeeById(
+  server-mohit.js:3691:              employeeId
+  server-mohit.js:3692:            )
+  server-mohit.js:3693:          : null;
+  server-mohit.js:3694:
+  server-mohit.js:3695:      if (!employeeId) {
+  server-mohit.js:3696:        return res
+  server-mohit.js:3697:          .status(400)
+  server-mohit.js:3698:          .json({
+  server-mohit.js:3699:            success: false,
+  server-mohit.js:3700:            error:
+  server-mohit.js:3701:              'employeeId is required.',
+  server-mohit.js:3702:          });
+  server-mohit.js:3703:      }
+  server-mohit.js:3704:
+  server-mohit.js:3705:      if (!employee) {
+  server-mohit.js:3706:        return res
+  server-mohit.js:3707:          .status(404)
+  server-mohit.js:3708:          .json({
+  server-mohit.js:3709:            success: false,
+  server-mohit.js:3710:            error:
+  server-mohit.js:3711:              'Employee not found.',
+  server-mohit.js:3712:          });
+  server-mohit.js:3713:      }
+  server-mohit.js:3714:
+  server-mohit.js:3715:      if (
+  server-mohit.js:3716:        !isValidDateKey(
+  server-mohit.js:3717:          body.dateKey
+  server-mohit.js:3718:        )
+
+

@@ -1,0 +1,9 @@
+{
+  "employeeId": "employee-001",
+  "firstName": "Test",
+  "lastName": "Employee",
+  "employeeName": "Test Employee",
+  "email": "employee@workmonitor.local",
+  "approved": true,
+  "updatedAt": "2026-11-03T08:44:06.429Z"
+}

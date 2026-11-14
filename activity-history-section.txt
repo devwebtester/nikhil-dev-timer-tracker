@@ -1,0 +1,160 @@
+﻿
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+);
+
+// ======================================================
+// ACTIVITY HISTORY
+// ======================================================
+
+app.get(
+  '/api/activity-history/:employeeId',
+  (
+    req,
+    res
+  ) => {
+    try {
+      const employee =
+        findEmployeeById(
+          req.params.employeeId
+        );
+
+      if (
+        !employee
+      ) {
+        return res
+          .status(
+            404
+          )
+          .json({
+            success:
+              false,
+
+            error:
+              'Employee not found.',
+          });
+      }
+
+      const tracker =
+        readTracker();
+
+      const trackerDates =
+        Object.keys(
+          tracker[
+            employee.id
+          ]?.dates ||
+            {}
+        );
+
+      const screenshotDates =
+        getEmployeeDateFolders(
+          employee
+        );
+
+      const dates =
+        Array.from(
+          new Set([
+            ...trackerDates,
+            ...screenshotDates,
+          ])
+        )
+          .sort()
+          .reverse();
+
+      const records =
+        dates.map(
+          (
+            dateKey
+          ) => ({
+            dateKey,
+
+            totalSeconds:
+              Number(
+                tracker[
+                  employee.id
+                ]?.dates?.[
+                  dateKey
+                ]?.totalSeconds ||
+                  0
+              ),
+
+            screenshotCount:
+              getScreenshotCount(
+                employee,
+                dateKey
+              ),
+          })
+        );
+
+      return res.json({
+        success:
+          true,
+
+        employee: {
+          id:
+            employee.id,
+
+          firstName:
+            employee.firstName ||
+            '',
+
+          lastName:
+            employee.lastName ||
+            '',
+
+          name:
+            getEmployeeFullName(
+              employee
+            ),
+
+          email:
+            employee.email,
+        },
+
+        records,
+      });
+    } catch (
+      error
+    ) {
+      console.error(
+        'History error:',
+        error
+      );
+
+      return res
+        .status(
+          500
+        )
+        .json({
+          success:
+            false,
+
+          error:
+            error.message,
+        });
+    }
+  }
+);
+
+// ======================================================
+// ADMIN SUMMARY
+// ======================================================
+
+app.get(
+  '/api/admin/activity-summary',
+  (
+    req,
+    res
+  ) => {
+    try {
+      const employees =
+        readEmployees();
+
+      const tracker =
+        readTracker();
+
+      const today =
