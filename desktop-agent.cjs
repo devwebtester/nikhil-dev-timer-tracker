@@ -86,14 +86,29 @@ uIOhook.on('keydown', () => {
 
 
 
+// function send(res, status, body) {
+//   res.writeHead(status, {
+//     'Content-Type': 'application/json; charset=utf-8',
+//     'Access-Control-Allow-Origin': '*',
+//     'Access-Control-Allow-Methods': 'POST, OPTIONS',
+//     'Access-Control-Allow-Headers': 'Content-Type',
+//     'Cache-Control': 'no-store',
+//   });
+//   res.end(JSON.stringify(body));
+// }
+
 function send(res, status, body) {
-  res.writeHead(status, {
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Private-Network': 'true',
+    'Access-Control-Max-Age': '600',
     'Cache-Control': 'no-store',
-  });
+  };
+  res.writeHead(status, headers);
+  if (status === 204) return res.end();
   res.end(JSON.stringify(body));
 }
 

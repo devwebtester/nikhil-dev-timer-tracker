@@ -7829,6 +7829,7 @@
 //     </div>
 //   );
 // };
+// ----
 import { TimeActivityReport } from './TimeActivityReport';
 import { PaginationControls, usePagination } from './ScreenshotPagination';
 import { MyTimeTracking, type ViewMode } from './MyTimeTracking';
@@ -8032,6 +8033,23 @@ interface ScreenshotActivityCounts {
   activeSeconds?: number;
   trackedSeconds?: number;
 }
+
+const POINTS_PER_SECOND_FOR_100 = 20;
+
+const computeActivityPercent = (
+  c: Partial<ScreenshotActivityCounts> | null | undefined,
+  seconds: number
+) => {
+  const score =
+    (Number(c?.mouseMoves) || 0) * 1 +
+    (Number(c?.mouseClicks) || 0) * 5 +
+    (Number(c?.keyPresses) || 0) * 3;
+  const windowSec = seconds > 0 ? seconds : 10;
+  return Math.min(
+    100,
+    Math.round((score / (windowSec * POINTS_PER_SECOND_FOR_100)) * 100)
+  );
+};
 
 const getActivityStorageKey = (
   employeeId: string,
@@ -8386,6 +8404,9 @@ export const EmployeeDashboard:
     mouseClicks: 0,
     keyPresses: 0,
   });
+  const browserActiveSecondsRef = useRef(0);
+  const browserTrackedSecondsRef = useRef(0);
+  const browserLastInputAtRef = useRef(0);
 
   const lastMousePositionRef = useRef({
     x: 0,
@@ -8440,6 +8461,16 @@ export const EmployeeDashboard:
       window.removeEventListener('click', handleMouseClick, true);
       window.removeEventListener('keydown', handleKeyDown, true);
     };
+  }, []);
+
+    // Counts tracked seconds in the browser (used for the activity percent
+  // when the desktop agent is not running).
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!trackingRef.current || pausedRef.current) return;
+      browserTrackedSecondsRef.current += 1;
+    }, 1000);
+    return () => window.clearInterval(id);
   }, []);
 
   const captureTimerRef =
@@ -8856,6 +8887,7 @@ export const EmployeeDashboard:
 
     trackingRef.current = false;
     pausedRef.current = false;
+          browserTrackedSecondsRef.current = 0;
 
     const finalSeconds =
       frozenAt === undefined ? endSegment() : freezeAt(frozenAt);
@@ -9500,6 +9532,8 @@ export const EmployeeDashboard:
         const browserCounts = { ...activityCountsRef.current };
         activityCountsRef.current = { mouseMoves: 0, mouseClicks: 0, keyPresses: 0 };
         lastMousePositionRef.current = { x: 0, y: 0, initialized: false };
+                const browserTrackedSeconds = browserTrackedSecondsRef.current;
+        browserTrackedSecondsRef.current = 0;
 
         // Global Windows input from the optional agent. If the agent is not
         // running, fall back to the counts captured in the browser.
@@ -9508,17 +9542,17 @@ export const EmployeeDashboard:
         const pick = (agentValue: unknown, browserValue: number) =>
           Math.max(0, Number(agentRunning ? agentValue : browserValue) || 0);
 
-        const activityCounts: ScreenshotActivityCounts = {
+                const activityCounts: ScreenshotActivityCounts = {
           mouseMoves: pick(globalCounts?.mouseMoves, browserCounts.mouseMoves),
           mouseClicks: pick(globalCounts?.mouseClicks, browserCounts.mouseClicks),
           keyPresses: pick(globalCounts?.keyPresses, browserCounts.keyPresses),
-          activityPercent: Math.min(
-            100,
-            Math.max(0, Number(globalCounts?.activityPercent) || 0)
-          ),
-          activeSeconds: Math.max(0, Number(globalCounts?.activeSeconds) || 0),
-          trackedSeconds: Math.max(0, Number(globalCounts?.trackedSeconds) || 0),
+          activeSeconds: pick(globalCounts?.activeSeconds, 0),
+          trackedSeconds: pick(globalCounts?.trackedSeconds, browserTrackedSeconds),
         };
+        activityCounts.activityPercent = computeActivityPercent(
+          activityCounts,
+          activityCounts.trackedSeconds ?? 0
+        );
 
         const result =
           await uploadScreenshotLocally(
@@ -10748,6 +10782,8 @@ export const EmployeeDashboard:
       pausedRef.current =
         false;
 
+      browserTrackedSecondsRef.current = 0;
+
       const globalAgentStarted = await callGlobalActivityAgent('start');
 
       setIsTracking(
@@ -11713,10 +11749,26 @@ return records.map((r) => ({
                                       }
                                     ).activityCounts;
 
-                                    const activityPercent = Math.min(
+                                    const storedPercent = Math.min(
                                       100,
                                       Math.max(0, Number(counts?.activityPercent) || 0)
                                     );
+
+                                    // Always derive the percent from the counts, so it still works
+                                    // when the stored percent was lost (refresh, server reload, old captures).
+                                    const windowSeconds =
+                                      Number(counts?.trackedSeconds) > 0
+                                        ? Number(counts?.trackedSeconds)
+                                        : Math.max(
+                                            5,
+                                            Math.round(
+                                              captureWindowSeconds / Math.max(1, screenshotsPerWindow)
+                                            )
+                                          );
+
+                                    const activityPercent = counts
+                                      ? computeActivityPercent(counts, windowSeconds)
+                                      : storedPercent;
 
                                     const activityColor =
                                       activityPercent === 0
